@@ -1,0 +1,127 @@
+version: "3.9"
+
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - WEBUI_PORT=8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - ./media/downloads:/downloads
+    restart: unless-stopped
+
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+#    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Seattle
+      - VERSION=docker
+      - PLEX_CLAIM=claim-QoKXezxCgYy5GjzrXHRv
+    ports:
+      - 32400:32400
+    volumes:
+      - ./config/plex:/config
+      - ./media:/media
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Seattle
+    volumes:
+      - ./config/radarr:/config
+      - ./media:/media
+      - ./media/downloads:/downloads
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Seattle
+    volumes:
+      - ./config/sonarr:/config
+      - ./media:/media
+      - ./media/downloads:/downloads
+    restart: unless-stopped
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Seattle
+    volumes:
+      - ./config/bazarr:/config
+      - ./media/movies:/movies
+      - ./media/tv:/tv
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Seattle
+    volumes:
+      - ./config/prowlarr:/config
+    restart: unless-stopped
+
+  overseerr:
+    image: sctx/overseerr:latest
+    container_name: overseerr
+    environment:
+      - LOG_LEVEL=debug
+      - TZ=America/Seattle
+    volumes:
+      - ./config/overseerr:/app/config
+    restart: unless-stopped
+
+  cloudcmd:
+    image: coderaiser/cloudcmd:latest
+    container_name: cloudcmd
+    environment:
+      - CLOUDCMD_AUTH=true
+      - CLOUDCMD_USERNAME=admin
+      - CLOUDCMD_ROOT=/data                 # what to show
+      - CLOUDCMD_TERMINAL=false             # no web shell (safer)
+      - CLOUDCMD_OPEN=false                 # no external open
+    volumes:
+      - ./config/cloudcmd/.cloudcmd.json:/root/.cloudcmd.json:ro
+      - ./media:/data
+    restart: unless-stopped
+
+  flaresolverr:
+    image: flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - TZ=America/Seattle
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./config/caddy/data:/data
+      - ./config/caddy/config:/config
+      - ./site:/srv/site
+      - ./caddy_logs:/var/log/caddy 
+    restart: unless-stopped
