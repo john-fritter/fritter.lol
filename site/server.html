@@ -1,51 +1,227 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Server - fritter.lol</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Server – fritter.lol</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+  <style>
+    .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+    .row{display:flex;gap:12px;flex-wrap:wrap;margin:.5rem 0}
+    .stat{font-size:.95rem;color:var(--muted)}
+    .stat strong{color:var(--fg)}
+    canvas{width:100%;height:220px}
+    .svc-list a{display:inline-flex;align-items:center;gap:8px;margin:.25rem .5rem .25rem 0}
+    .dot{width:10px;height:10px;border-radius:50%}
+    .dot.ok{background:#22c55e}
+    .dot.bad{background:#ef4444}
+    .muted-sm{font-size:.9rem;color:var(--muted)}
+  </style>
 </head>
 <body>
-  <header>
-    <div class="wrap">
-      <h1 style="margin:0 0 8px;"><a href="/" class="site-title">fritter.lol</a></h1>
-    </div>
-  </header>
+<header>
+  <div class="wrap">
+    <h1><a href="/" class="site-title">fritter.lol</a></h1>
+  </div>
+</header>
 
-  <main class="wrap">
-    <section class="grid hero">
-      <div class="card">
-        <h3>Cloud Commander</h3>
-        <p class="muted">File Manager</p>
-        <a class="btn" href="https://files.fritter.lol">Open Files</a>
-      </div>
-      <div class="card">
-        <h3>Sonarr</h3>
-        <p class="muted">TV</p>
-        <a class="btn" href="https://sonarr.fritter.lol">Open Sonarr</a>
-      </div>
-      <div class="card">
-        <h3>Radarr</h3>
-        <p class="muted">Movies</p>
-        <a class="btn" href="https://radarr.fritter.lol">Open Radarr</a>
-      </div>
-      <div class="card">
-        <h3>qBittorrent</h3>
-        <p class="muted">Downloads</p>
-        <a class="btn" href="https://qb.fritter.lol">Open qBittorrent</a>
-      </div>
-      <div class="card">
-        <h3>Prowlarr</h3>
-        <a class="btn" href="https://prowlarr.fritter.lol">Open Prowlarr</a>
-        <p class="muted">Trackers</p>
-      </div>
-      <div class="card">
-        <h3>Bazarr</h3>
-        <p class="muted">Bazarr</p>
-        <a class="btn" href="https://bazarr.fritter.lol">Open Bazarr</a>
-      </div>
+<main class="wrap">
+  <h2>Server Dashboard</h2>
+  <p class="muted">Private dashboard — <span id="period"></span> • <span id="last">Last refresh: —</span></p>
+
+  <section class="grid">
+    <section class="card">
+      <h3>CPU</h3>
+      <div class="row"><div class="stat">Avg load (1/5/15): <strong id="cpu-load">—</strong></div></div>
+      <canvas id="cpuChart" aria-label="CPU %"></canvas>
+      <div class="muted-sm">CPU usage over time (0–100%)</div>
     </section>
-  </main>
+
+    <section class="card">
+      <h3>Memory</h3>
+      <div class="row">
+        <div class="stat">Used: <strong id="mem-used">—</strong></div>
+        <div class="stat">Total: <strong id="mem-total">—</strong></div>
+      </div>
+      <canvas id="memDonut" aria-label="Memory used vs free"></canvas>
+    </section>
+
+    <section class="card">
+      <h3>Disk</h3>
+      <div class="row">
+        <div class="stat">Root Used: <strong id="disk-used">—</strong></div>
+        <div class="stat">Root Total: <strong id="disk-total">—</strong></div>
+      </div>
+      <canvas id="diskDonut" aria-label="Disk used vs free"></canvas>
+    </section>
+
+    <section class="card">
+      <h3>Network</h3>
+      <div class="row">
+        <div class="stat">Up: <strong id="net-up">—</strong></div>
+        <div class="stat">Down: <strong id="net-down">—</strong></div>
+      </div>
+      <canvas id="netChart" aria-label="Network throughput"></canvas>
+      <div class="muted-sm">Throughput over time</div>
+    </section>
+
+    <section class="card">
+      <h3>Uptime</h3>
+      <div class="row"><div class="stat">Current: <strong id="uptime-text">—</strong></div></div>
+      <canvas id="uptimeDonut" aria-label="Uptime coverage of last 24h"></canvas>
+      <div class="muted-sm">Coverage of last 24h (approx.)</div>
+    </section>
+
+    <section class="card">
+      <h3>Docker</h3>
+      <div class="row">
+        <div class="stat">Running: <strong id="dock-running">—</strong></div>
+        <div class="stat">Stopped: <strong id="dock-stopped">—</strong></div>
+        <div class="stat">Total: <strong id="dock-total">—</strong></div>
+      </div>
+      <div id="dock-list" class="muted-sm" style="max-height:160px;overflow:auto;"></div>
+    </section>
+
+    <section class="card">
+      <h3>Services</h3>
+      <div class="svc-list" id="svc-list"></div>
+    </section>
+  </section>
+</main>
+
+<script>
+const API = '/server/api/4';
+
+// === Config: history and interval ===
+const INTERVAL_MS = 5000;            // sampling interval
+const HISTORY_MIN = 10;              // show last N minutes
+const POINTS = Math.ceil((HISTORY_MIN*60*1000)/INTERVAL_MS);
+
+document.getElementById('period').textContent = `last ${HISTORY_MIN} min • ${INTERVAL_MS/1000}s interval`;
+
+const labels = Array.from({length: POINTS}, ()=>'');
+const series = () => Array.from({length: POINTS}, ()=>null);
+const cpuS = series(), upS = series(), dnS = series();
+
+const isNum=(v)=>typeof v==='number'&&isFinite(v);
+const fmtBytes=(b)=>{ if(!isNum(b)) return '—'; const u=['B','KB','MB','GB','TB']; let n=b,i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(1)+' '+u[i]; };
+const fmtDur=(sec)=>{ if(!isNum(sec)) return '—'; const d=Math.floor(sec/86400); sec%=86400; const h=Math.floor(sec/3600); sec%=3600; const m=Math.floor(sec/60); return (d?d+'d ':'')+h+'h '+m+'m'; };
+function push(s,v){ s.push(v); if(s.length>POINTS) s.shift(); }
+
+let prevDisk=null, prevNet=null;
+
+// === Charts ===
+const charts = {
+  cpu:  new Chart(document.getElementById('cpuChart'),  {type:'line', data:{labels, datasets:[{label:'CPU %', data:cpuS}]}, options:{responsive:true,animation:false,scales:{x:{ticks:{display:false}},y:{beginAtZero:true, max:100}}}}),
+  net:  new Chart(document.getElementById('netChart'),  {type:'line', data:{labels, datasets:[{label:'Up KB/s', data:upS},{label:'Down KB/s', data:dnS}]}, options:{responsive:true,animation:false,scales:{x:{ticks:{display:false}},y:{beginAtZero:true}}}}),
+  mem:  new Chart(document.getElementById('memDonut'),  {type:'doughnut', data:{labels:['Used','Free'], datasets:[{data:[0,1]}]}, options:{responsive:true,plugins:{legend:{display:true}}}}),
+  disk: new Chart(document.getElementById('diskDonut'), {type:'doughnut', data:{labels:['Used','Free'], datasets:[{data:[0,1]}]}, options:{responsive:true,plugins:{legend:{display:true}}}}),
+  up24: new Chart(document.getElementById('uptimeDonut'),{type:'doughnut', data:{labels:['Up last 24h','Down'], datasets:[{data:[1,0]}]}, options:{responsive:true,plugins:{legend:{display:true}}}})
+};
+function setLast(){ document.getElementById('last').textContent = 'Last refresh: '+ new Date().toLocaleTimeString(); }
+
+// === Service map: containerName -> link ===
+const SERVICES = [
+  {name:'qbittorrent', url:'https://qb.fritter.lol'},
+  {name:'sonarr',      url:'https://sonarr.fritter.lol'},
+  {name:'radarr',      url:'https://radarr.fritter.lol'},
+  {name:'bazarr',      url:'https://bazarr.fritter.lol'},
+  {name:'prowlarr',    url:'https://prowlarr.fritter.lol'},
+  {name:'overseerr',   url:'https://overseerr.fritter.lol'},
+  {name:'plex',        url:'https://plex.fritter.lol'},
+  {name:'cloudcmd',    url:'https://files.fritter.lol'}
+];
+
+function renderServices(statusByName){
+  const wrap = document.getElementById('svc-list');
+  wrap.innerHTML = SERVICES.map(s=>{
+    const ok = statusByName.get(s.name) === 'running';
+    return `<a class="btn" href="${s.url}" target="_blank" rel="noopener">
+      <span class="dot ${ok?'ok':'bad'}"></span>${s.name}
+    </a>`;
+  }).join('');
+}
+
+async function j(path){ const r=await fetch(path,{cache:'no-store'}); if(!r.ok) throw new Error(path+' -> '+r.status); return r.json(); }
+
+async function tick(){
+  try{
+    // CPU % and load
+    const [cpuPct, load] = await Promise.all([ j(`${API}/cpu/percentage`), j(`${API}/load`) ]);
+    const used = Array.isArray(cpuPct) ? (cpuPct.filter(isNum).reduce((a,b)=>a+b,0)/(cpuPct.filter(isNum).length||1)) : (isNum(cpuPct)?cpuPct:null);
+    push(cpuS, isNum(used)? Number(used.toFixed(1)) : null);
+    charts.cpu.update('none');
+    document.getElementById('cpu-load').textContent = [load?.min1,load?.min5,load?.min15].map(v=>isNum(v)?v.toFixed(2):'—').join(', ');
+
+    // Memory donut
+    const mem = await j(`${API}/mem`);
+    const usedPct = isNum(mem?.used)&&isNum(mem?.total)&&mem.total>0 ? (mem.used/mem.total*100) : null;
+    charts.mem.data.datasets[0].data = [ isNum(mem?.used)?mem.used:0, isNum(mem?.total)?Math.max(mem.total-mem.used,0):1 ];
+    charts.mem.update('none');
+    document.getElementById('mem-used').textContent = fmtBytes(mem?.used);
+    document.getElementById('mem-total').textContent = fmtBytes(mem?.total);
+
+    // Disk donut (root fs)
+    const fs = await j(`${API}/fs`);
+    const root = Array.isArray(fs) && fs.length ? (fs.find(f=>f.mountpoint==='/') || fs[0]) : null;
+    const usedB = root?.used ?? 0, totalB = root?.size ?? 1;
+    charts.disk.data.datasets[0].data = [usedB, Math.max(totalB-usedB,0)];
+    charts.disk.update('none');
+    document.getElementById('disk-used').textContent = fmtBytes(root?.used);
+    document.getElementById('disk-total').textContent = fmtBytes(root?.size);
+
+    // Network rates
+    const net = await j(`${API}/network`);
+    const agg = (Array.isArray(net)?net:[]).filter(n=>n?.interface!=='lo')
+      .reduce((a,n)=>({ bytes_sent:a.bytes_sent+(n?.bytes_sent||0), bytes_recv:a.bytes_recv+(n?.bytes_recv||0) }), {bytes_sent:0,bytes_recv:0});
+    if(prevNet){
+      const dt = INTERVAL_MS/1000;
+      const upKB = Math.max(0, (agg.bytes_sent - prevNet.bytes_sent)/1024/dt);
+      const dnKB = Math.max(0, (agg.bytes_recv - prevNet.bytes_recv)/1024/dt);
+      push(upS, Number(upKB.toFixed(1)));
+      push(dnS, Number(dnKB.toFixed(1)));
+      charts.net.update('none');
+      document.getElementById('net-up').textContent   = upKB.toFixed(1)+' KB/s';
+      document.getElementById('net-down').textContent = dnKB.toFixed(1)+' KB/s';
+    }
+    prevNet = agg;
+
+    // Uptime
+    const up = await j(`${API}/uptime`); // seconds since boot
+    const upPct24 = Math.min(1, (isNum(up)?up:0) / 86400) * 100;
+    charts.up24.data.datasets[0].data = [ upPct24, 100 - upPct24 ];
+    charts.up24.update('none');
+    document.getElementById('uptime-text').textContent = fmtDur(up);
+
+    // Docker + service lights
+    const dock = await j(`${API}/docker`).catch(()=>[]);
+    const running = dock.filter(c=>c?.status==='running').length;
+    document.getElementById('dock-running').textContent = running;
+    document.getElementById('dock-stopped').textContent = Math.max(0, (dock.length||0) - running);
+    document.getElementById('dock-total').textContent   = dock.length||0;
+    document.getElementById('dock-list').innerHTML = (dock||[]).map(c=>c?.name).sort().map(n=>`<div>${n}</div>`).join('');
+
+    const statusByName = new Map((dock||[]).map(c=>[String(c?.name||'').toLowerCase(), c?.status||'unknown']));
+    renderServices(statusByName);
+
+
+    setLast();
+  } catch(e){
+    console.error('[dashboard]', e.message);
+  }
+}
+
+(async ()=>{
+  // primer samples for rate math
+  try{
+    const net0 = await j(`${API}/network`);
+    prevNet = (Array.isArray(net0)?net0:[]).filter(n=>n?.interface!=='lo')
+      .reduce((a,n)=>({ bytes_sent:a.bytes_sent+(n?.bytes_sent||0), bytes_recv:a.bytes_recv+(n?.bytes_recv||0) }), {bytes_sent:0,bytes_recv:0});
+  }catch{}
+  await tick();
+  setInterval(tick, INTERVAL_MS);
+})();
+</script>
 </body>
 </html>

@@ -2,31 +2,85 @@
     email jefritter@gmail.com
 }
 
-# Root site
+# Root Site
 fritter.lol {
-    root * /srv/site
-    file_server
+  encode zstd gzip
+  root * /srv/site
 
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
-    
-    handle_errors {
-        rewrite * /404.html
-        file_server
-    }
+  # Redirect old /server and /server.html to the new subdomain
+  @old_server path /server /server/
+  redir @old_server https://server.fritter.lol/ 308
+
+  @old_server_html path /server.html
+  redir @old_server_html https://server.fritter.lol/ 308
+
+  # If anything still hits the old API path, forward it to the new host
+  @old_api path /server/api/*
+  handle @old_api {
+    uri replace /server/api /api
+    redir https://server.fritter.lol{uri} 308
+  }
+
+  # Normal static site
+  handle {
+    try_files {path} /index.html
+    file_server
+  }
+
+  # Headers
+  header {
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  }
+
+  # Logging
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+
+  # Custom 404
+  handle_errors {
+    rewrite * /404.html
+    file_server
+  }
+}
+
+# Dashy + Glances on a dedicated subdomain (simple + robust)
+server.fritter.lol {
+  encode zstd gzip
+
+  # Basic Auth for the whole dashboard
+  basic_auth * {
+    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
+  }
+
+  # Glances UI at /glances/ (and /api/* under same host)
+  @glances_ui path /glances/*
+  handle @glances_ui {
+    uri replace /glances /
+    reverse_proxy glances:61208
+  }
+
+  # Everything else goes to Dashy (it lives at "/" here)
+  reverse_proxy dashy:8080
+
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
 
 # Overseerr
 overseerr.fritter.lol {
-    reverse_proxy overseerr:5055
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
+  reverse_proxy overseerr:5055
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
+
 
 # Sonarr
 sonarr.fritter.lol {
@@ -86,4 +140,14 @@ plex.fritter.lol {
         output file /var/log/caddy/access.log
         format json
     }
+}
+
+# Bazarr
+bazarr.fritter.lol {
+  reverse_proxy bazarr:6767
+
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
