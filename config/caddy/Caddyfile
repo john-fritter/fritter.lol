@@ -47,23 +47,23 @@ fritter.lol {
   }
 }
 
-# Dashy + Glances on a dedicated subdomain (simple + robust)
+# Dashy + Glances
 server.fritter.lol {
   encode zstd gzip
 
-  # Basic Auth for the whole dashboard
   basic_auth * {
     admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
   }
 
-  # Glances UI at /glances/ (and /api/* under same host)
-  @glances_ui path /glances/*
-  handle @glances_ui {
-    uri replace /glances /
+  # Glances at /glances -> strip prefix before proxying
+  handle_path /glances* {
     reverse_proxy glances:61208
+    # allow embedding just in case
+    header -down X-Frame-Options
+    header -down Content-Security-Policy
   }
 
-  # Everything else goes to Dashy (it lives at "/" here)
+  # Everything else -> Dashy
   reverse_proxy dashy:8080
 
   log {
@@ -71,6 +71,7 @@ server.fritter.lol {
     format json
   }
 }
+
 
 # Overseerr
 overseerr.fritter.lol {
@@ -80,7 +81,6 @@ overseerr.fritter.lol {
     format json
   }
 }
-
 
 # Sonarr
 sonarr.fritter.lol {
@@ -151,3 +151,30 @@ bazarr.fritter.lol {
     format json
   }
 }
+
+grafana.fritter.lol {
+  basic_auth * {
+    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
+  }
+  reverse_proxy grafana:3000
+  header {
+    X-Frame-Options "ALLOWALL"
+    Content-Security-Policy "frame-ancestors https://server.fritter.lol https://*.fritter.lol"
+  }
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+
+prometheus.fritter.lol {
+  basic_auth * {
+    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
+  }
+  reverse_proxy prometheus:9090
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+

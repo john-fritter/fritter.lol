@@ -144,4 +144,47 @@ services:
       - GLANCES_OPT=--webserver
       - TZ=America/Los_Angeles
     restart: unless-stopped
+    
+  node_exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node_exporter
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    command:
+      - '--web.listen-address=0.0.0.0:9100'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run/docker/netns)($$|/)'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    volumes:
+      - /srv/seedbox/config/grafana:/var/lib/grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_COOKIE_SAMESITE=None
+      - GF_SECURITY_COOKIE_SECURE=true
+
 
