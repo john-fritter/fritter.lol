@@ -132,18 +132,6 @@ services:
     volumes:
       - ./config/dashy/conf.yml:/app/user-data/conf.yml
     restart: unless-stopped
-
-
-  glances:
-    image: nicolargo/glances:latest-full
-    container_name: glances
-    pid: "host"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - GLANCES_OPT=--webserver
-      - TZ=America/Los_Angeles
-    restart: unless-stopped
     
   node_exporter:
     image: prom/node-exporter:v1.8.2
@@ -171,6 +159,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -178,7 +167,7 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     volumes:
-      - /srv/seedbox/config/grafana:/var/lib/grafana
+      - grafana-data:/var/lib/grafana
     restart: unless-stopped
     environment:
       - GF_SECURITY_ALLOW_EMBEDDING=true
@@ -186,5 +175,38 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SECURITY_COOKIE_SAMESITE=None
       - GF_SECURITY_COOKIE_SECURE=true
+      
+  tautulli:
+    image: tautulli/tautulli
+    container_name: tautulli
+    restart: unless-stopped
+    volumes:
+      - /srv/seedbox/config/tautulli:/config
+    ports:
+      - "8181:8181"
+    networks:
+      - default
+    depends_on:
+      - plex
 
 
+  media-proxy:
+    build:
+      context: /srv/seedbox/media-proxy
+    environment:
+      - PORT=8080
+      - TAUTULLI_URL=http://tautulli:8181
+      - TAUTULLI_KEY=${TAUTULLI_API_KEY}
+      - OVERSEERR_URL=http://overseerr:5055
+      - OVERSEERR_KEY=${OVERSEERR_API_KEY}
+      - TAUTULLI_PUBLIC_EMBED=
+    networks:
+      - default
+    restart: unless-stopped
+    depends_on:
+      - tautulli
+      - overseerr
+      
+volumes:
+  prometheus-data: {}
+  grafana-data: {}

@@ -3,8 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Media - fritter.lol</title>
-  <link rel="stylesheet" href="styles.css">
+  <title>Media · fritter.lol</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .muted { opacity:.75; font-size:.9rem }
+    .row { display:flex; gap:12px; align-items:center; justify-content:space-between; }
+    .btn-row { display:flex; gap:10px; flex-wrap:wrap }
+    .grid-2 { display:grid; gap:16px; grid-template-columns: 1fr; }
+    @media (min-width: 900px){ .grid-2 { grid-template-columns: 2fr 1fr; } }
+    .poster-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap:10px; }
+    .tile { display:flex; flex-direction:column; gap:6px; }
+    .tile img { width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:10px }
+    .tile .t { font-weight:600; font-size:.95rem; }
+    .tile .s { font-size:.85rem; opacity:.8 }
+    .chart { width:100%; height:120px; }
+    .pill { display:inline-block; padding:.2rem .5rem; border-radius:999px; border:1px solid rgba(255,255,255,.15); font-size:.8rem }
+  </style>
 </head>
 <body>
   <header>
@@ -14,18 +28,93 @@
   </header>
 
   <main class="wrap">
-    <section class="grid hero">
-      <div class="card">
-        <h3>Plex</h3>
-        <p class="muted">Movies & TV</p>
-        <a class="btn" href="https://plex.fritter.lol">Open Plex</a>
+    <section class="card">
+      <div class="row">
+        <h2 style="margin:0">Media Hub</h2>
+        <div class="btn-row">
+          <a class="btn" href="https://plex.fritter.lol">Open Plex</a>
+          <a class="btn" href="https://overseerr.fritter.lol">Open Overseerr</a>
+        </div>
       </div>
+      <p class="muted">A public peek at what’s been watched lately and weekly activity. No private details shown.</p>
+    </section>
+
+    <section class="grid-2">
       <div class="card">
-        <h3>Overseerr</h3>
-        <p class="muted">Requests & Activity</p>
-        <a class="btn" href="https://overseerr.fritter.lol">Open Overseerr</a>
+        <div class="row"><h3 style="margin:0">Recently Watched</h3><span class="pill">via Tautulli → Plex</span></div>
+        <div id="watched" class="poster-grid"></div>
+      </div>
+
+      <div class="card">
+        <div class="row"><h3 style="margin:0">This Week’s Activity</h3><span class="muted" id="sum"></span></div>
+        <svg id="chart" class="chart" viewBox="0 0 320 120" preserveAspectRatio="none"></svg>
+        <div class="muted" id="chartLabels" style="display:flex; gap:8px; justify-content:space-between; margin-top:6px"></div>
       </div>
     </section>
   </main>
+
+  <script>
+    const $ = s => document.querySelector(s);
+    const apibase = '/api/media';
+    const placeholder = '/site/placeholder-poster.jpg';
+
+    async function get(p){
+      const r = await fetch(`${apibase}${p}`, { headers: { 'Accept':'application/json' }});
+      if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      return r.json();
+    }
+
+    function tile(item){
+      const title = item.grandparent_title ? `${item.grandparent_title} — ${item.title}` : item.title;
+      const when = item.watched_at ? new Date(item.watched_at).toLocaleDateString() : '';
+      const img = item.poster || placeholder;
+      return `<div class="tile">
+        <img src="${img}" alt="${title}">
+        <div class="t">${title || 'Unknown'}</div>
+        <div class="s">${when}</div>
+      </div>`;
+    }
+
+    function drawBars(svg, counts){
+      // simple bar chart in 320x120
+      const w=320, h=120, pad=8;
+      const max = Math.max(1, ...counts);
+      const bw = (w - pad*2) / counts.length;
+      const bars = counts.map((v,i)=>{
+        const barH = Math.round((v/max) * (h - pad*2));
+        const x = Math.round(pad + i*bw);
+        const y = Math.round(h - pad - barH);
+        return `<rect x="${x}" y="${y}" width="${Math.max(2,bw-4)}" height="${barH}" rx="3" ry="3"></rect>`;
+      }).join('');
+      svg.innerHTML = `<g fill="currentColor" opacity=".9">${bars}</g>`;
+    }
+
+    async function boot(){
+      try{
+        const [watched, activity] = await Promise.all([
+          get('/recently-watched?limit=12'),
+          get('/activity/daily?days=7'),
+        ]);
+
+        // Recently watched tiles
+        const items = watched.items || [];
+        $('#watched').innerHTML = items.length
+          ? items.map(tile).join('')
+          : `<div class="muted">No watch history yet. Start something in Plex!</div>`;
+
+        // Activity chart
+        const days = activity.days || [];
+        const counts = activity.counts || [];
+        $('#sum').textContent = counts.reduce((a,b)=>a+b,0) + ' plays';
+        drawBars($('#chart'), counts);
+        $('#chartLabels').innerHTML = days.map(d => `<span>${d.slice(5)}</span>`).join('');
+
+      } catch(e){
+        console.error(e);
+        $('#watched').innerHTML = `<div class="muted">Failed to load.</div>`;
+      }
+    }
+    boot();
+  </script>
 </body>
 </html>

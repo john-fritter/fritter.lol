@@ -5,9 +5,17 @@
 # Root Site
 fritter.lol {
   encode zstd gzip
-  root * /srv/site
 
-  # Redirect old /server and /server.html to the new subdomain
+  # --- 1) API FIRST: /api/media/* -> media-proxy ---
+  @media_api path /api/media/*
+  handle @media_api {
+    header {
+      Cache-Control max-age=15, public
+    }
+    reverse_proxy media-proxy:8080
+  }
+
+  # --- 2) Redirects for old /server paths ---
   @old_server path /server /server/
   redir @old_server https://server.fritter.lol/ 308
 
@@ -21,33 +29,37 @@ fritter.lol {
     redir https://server.fritter.lol{uri} 308
   }
 
-  # Normal static site
+  # --- 3) Static site (path INSIDE the Caddy container) ---
+  root * /srv/site
   handle {
     try_files {path} /index.html
     file_server
   }
 
-  # Headers
+  # --- 4) Global headers ---
   header {
     X-Frame-Options "DENY"
     Referrer-Policy "no-referrer"
     Permissions-Policy "geolocation=(), microphone=(), camera=()"
   }
 
-  # Logging
+  # --- 5) Logging ---
   log {
     output file /var/log/caddy/access.log
     format json
   }
 
-  # Custom 404
+  # --- 6) Custom 404 (set root again inside error handler) ---
   handle_errors {
-    rewrite * /404.html
+    @is404 expression {http.error.status_code} == 404
+    root * /srv/site
+    rewrite @is404 /404.html
     file_server
   }
 }
 
-# Dashy + Glances
+
+# Dashy
 server.fritter.lol {
   encode zstd gzip
 
@@ -55,15 +67,6 @@ server.fritter.lol {
     admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
   }
 
-  # Glances at /glances -> strip prefix before proxying
-  handle_path /glances* {
-    reverse_proxy glances:61208
-    # allow embedding just in case
-    header -down X-Frame-Options
-    header -down Content-Security-Policy
-  }
-
-  # Everything else -> Dashy
   reverse_proxy dashy:8080
 
   log {
@@ -153,9 +156,6 @@ bazarr.fritter.lol {
 }
 
 grafana.fritter.lol {
-  basic_auth * {
-    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
-  }
   reverse_proxy grafana:3000
   header {
     X-Frame-Options "ALLOWALL"
@@ -178,3 +178,6 @@ prometheus.fritter.lol {
   }
 }
 
+tautulli.fritter.lol {
+    reverse_proxy tautulli:8181
+}
