@@ -177,13 +177,17 @@ services:
       - GF_SECURITY_COOKIE_SECURE=true
       
   tautulli:
-    image: tautulli/tautulli
+    image: tautulli/tautulli:latest
     container_name: tautulli
     restart: unless-stopped
-    volumes:
-      - /srv/seedbox/config/tautulli:/config
+    user: "1000:1000"
+    environment:
+      - TZ=America/Los_Angeles
     ports:
       - "8181:8181"
+    volumes:
+      - /srv/seedbox/config/tautulli:/config
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - default
     depends_on:
