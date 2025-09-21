@@ -58,11 +58,27 @@ async function safeFetchJson(url, opts = {}, timeout = TIMEOUT_MS) {
 function posterFromJellyfin(item) {
   if (!hasJellyfinEnv) return null;
   
-  // Jellyfin image API: /Items/{ItemId}/Images/{ImageType}
-  const imageId = item.ImageTags?.Primary || item.ImageTags?.Thumb;
-  if (imageId && item.Id) {
-    const jellyfinUrl = `${JELLYFIN_URL}/Items/${item.Id}/Images/Primary?height=450&width=300&quality=96&tag=${imageId}`;
-    console.log(`Building Jellyfin poster URL for item ${item.Id}: ${item.Name}`);
+  let jellyfinUrl = null;
+  
+  // Check for Primary image first
+  if (item.ImageTags?.Primary) {
+    const imageId = item.ImageTags.Primary;
+    jellyfinUrl = `${JELLYFIN_URL}/Items/${item.Id}/Images/Primary?height=450&quality=96&tag=${imageId}`;
+    console.log(`Building Jellyfin Primary poster URL for item ${item.Id}: ${item.Name}`);
+  }
+  // Fall back to Thumb image
+  else if (item.ImageTags?.Thumb) {
+    const imageId = item.ImageTags.Thumb;
+    jellyfinUrl = `${JELLYFIN_URL}/Items/${item.Id}/Images/Thumb?height=300&quality=96&tag=${imageId}`;
+    console.log(`Building Jellyfin Thumb poster URL for item ${item.Id}: ${item.Name}`);
+  }
+  // For Episodes with no Primary, try to get the series poster
+  else if (item.Type === 'Episode' && item.SeriesId) {
+    jellyfinUrl = `${JELLYFIN_URL}/Items/${item.SeriesId}/Images/Primary?height=450&quality=96`;
+    console.log(`Building Jellyfin series poster URL for episode ${item.Id}: ${item.Name} (series: ${item.SeriesId})`);
+  }
+  
+  if (jellyfinUrl) {
     return `/api/media/img?u=${encodeURIComponent(jellyfinUrl)}&auth=jellyfin`;
   }
   

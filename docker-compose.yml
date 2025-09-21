@@ -185,7 +185,7 @@ services:
       - JELLYFIN_TOKEN=${JELLYFIN_API_KEY}
       - JELLYFIN_USER_ID=${JELLYFIN_USER_ID}
       - TIMEOUT_MS=5000
-      - JELLYFIN_DB_PATH=/jellyfin-config/data/jellyfin.db
+      - JELLYFIN_DB_PATH=/jellyfin-config/data/playback_reporting.db
     volumes:
       - /srv/seedbox/config/jellyfin:/jellyfin-config:ro
     networks:

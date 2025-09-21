@@ -11,11 +11,34 @@
     .btn-row { display:flex; gap:10px; flex-wrap:wrap }
     .grid-2 { display:grid; gap:16px; grid-template-columns: 1fr; }
     @media (min-width: 900px){ .grid-2 { grid-template-columns: 1fr 1fr; } }
-    .poster-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(110px,1fr)); gap:10px; }
-    .tile { display:flex; flex-direction:column; gap:6px; }
-    .tile img { width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:10px }
+    .poster-carousel { position:relative; }
+    .poster-grid { display:flex; gap:10px; overflow-x:hidden; scroll-behavior:smooth; width:470px; }
+    .poster-grid .tile { flex:0 0 110px; width:110px; }
+    .tile { position:relative; display:flex; flex-direction:column; }
+    .tile img { width:110px; height:165px; aspect-ratio:2/3; object-fit:cover; border-radius:10px }
     .tile .t { font-weight:600; font-size:.95rem; }
     .tile .s { font-size:.85rem; opacity:.8 }
+    .tile .overlay { 
+      position:absolute; 
+      top:0; left:0; right:0; bottom:0; 
+      background:linear-gradient(transparent 60%, rgba(0,0,0,0.8)); 
+      border-radius:10px; 
+      display:flex; 
+      flex-direction:column; 
+      justify-content:flex-end; 
+      padding:8px; 
+      opacity:0; 
+      transition:opacity 0.2s ease;
+      pointer-events:none;
+    }
+    .tile:hover .overlay { opacity:1; }
+    .tile .overlay .t { color:white; font-weight:600; font-size:.9rem; margin:0; }
+    .tile .overlay .s { color:rgba(255,255,255,0.9); font-size:.8rem; margin:2px 0 0; }
+    .carousel-nav { position:absolute; top:50%; transform:translateY(-50%); background:rgba(0,0,0,0.7); border:none; color:white; width:32px; height:32px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; z-index:10; transition:background-color 0.2s; }
+    .carousel-nav:hover { background:rgba(0,0,0,0.9); }
+    .carousel-nav:disabled { opacity:0.3; cursor:not-allowed; }
+    .carousel-nav.prev { left:8px; }
+    .carousel-nav.next { right:8px; }
     .chart { width:100%; height:120px; }
     .pill { display:inline-block; padding:.2rem .5rem; border-radius:999px; border:1px solid rgba(255,255,255,.15); font-size:.8rem }
   </style>
@@ -41,13 +64,21 @@
 
     <section class="grid-2">
       <div class="card">
-        <div class="row"><h3 style="margin:0">Recently Watched</h3><span class="pill">via Jellyfin</span></div>
-        <div id="watched" class="poster-grid"></div>
+        <div class="row"><h3 style="margin:0">Recently Watched</h3></div>
+        <div class="poster-carousel">
+          <button class="carousel-nav prev" onclick="scrollCarousel('watched', -1)">‹</button>
+          <div id="watched" class="poster-grid"></div>
+          <button class="carousel-nav next" onclick="scrollCarousel('watched', 1)">›</button>
+        </div>
       </div>
 
       <div class="card">
-        <div class="row"><h3 style="margin:0">Recently Added</h3><span class="pill">via Jellyfin</span></div>
-        <div id="added" class="poster-grid"></div>
+        <div class="row"><h3 style="margin:0">Recently Added</h3></div>
+        <div class="poster-carousel">
+          <button class="carousel-nav prev" onclick="scrollCarousel('added', -1)">‹</button>
+          <div id="added" class="poster-grid"></div>
+          <button class="carousel-nav next" onclick="scrollCarousel('added', 1)">›</button>
+        </div>
       </div>
     </section>
 
@@ -83,8 +114,10 @@
       const img = item.poster ? item.poster : placeholder;
       return `<div class="tile">
         <img src="${img}" alt="${title}">
-        <div class="t">${title || 'Unknown'}</div>
-        <div class="s">${when}</div>
+        <div class="overlay">
+          <div class="t">${title || 'Unknown'}</div>
+          <div class="s">${when}</div>
+        </div>
       </div>`;
     }
     
@@ -156,6 +189,34 @@
       return html;
     }
 
+    function scrollCarousel(containerId, direction) {
+      const container = $(`#${containerId}`);
+      const tileWidth = 110; // Fixed tile width
+      const gap = 10; // Gap between tiles
+      const scrollAmount = (tileWidth + gap) * 4; // Scroll by exactly 4 items
+      container.scrollBy({
+        left: direction * scrollAmount,
+        behavior: 'smooth'
+      });
+      
+      // Update button states after scroll
+      setTimeout(() => updateCarouselButtons(containerId), 300);
+    }
+
+    function updateCarouselButtons(containerId) {
+      const container = $(`#${containerId}`);
+      const carousel = container.parentElement;
+      const prevBtn = carousel.querySelector('.carousel-nav.prev');
+      const nextBtn = carousel.querySelector('.carousel-nav.next');
+      
+      // Check if we can scroll left or right
+      const canScrollLeft = container.scrollLeft > 0;
+      const canScrollRight = container.scrollLeft < (container.scrollWidth - container.offsetWidth);
+      
+      prevBtn.disabled = !canScrollLeft;
+      nextBtn.disabled = !canScrollRight;
+    }
+
     async function boot(){
       try{
         const [watched, added, weeklyActivity, monthlyActivity] = await Promise.all([
@@ -176,6 +237,12 @@
         $('#added').innerHTML = addedItems.length
           ? addedItems.map(tile).join('')
           : `<div class="muted">No recently added content.</div>`;
+
+        // Initialize carousel button states
+        setTimeout(() => {
+          updateCarouselButtons('watched');
+          updateCarouselButtons('added');
+        }, 100);
 
         // Weekly activity grid (7x8)
         const weeklyData = weeklyActivity.data || {};

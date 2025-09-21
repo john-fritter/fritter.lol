@@ -32,6 +32,10 @@ fritter.lol {
   # --- 3) Static site (path INSIDE the Caddy container) ---
   root * /srv/site
   handle {
+    # Handle /media -> /media.html routing
+    @media_page path /media /media/
+    rewrite @media_page /media.html
+    
     try_files {path} /index.html
     file_server
   }
@@ -58,7 +62,6 @@ fritter.lol {
   }
 }
 
-
 # Dashy
 server.fritter.lol {
   encode zstd gzip
@@ -75,84 +78,74 @@ server.fritter.lol {
   }
 }
 
-
-# Overseerr
-overseerr.fritter.lol {
-  reverse_proxy overseerr:5055
+# Sonarr
+sonarr.fritter.lol {
+  reverse_proxy sonarr:8989
+  
   log {
     output file /var/log/caddy/access.log
     format json
   }
 }
 
-# Sonarr
-sonarr.fritter.lol {
-    reverse_proxy sonarr:8989
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
-}
-
 # Radarr
 radarr.fritter.lol {
-    reverse_proxy radarr:7878
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
+  reverse_proxy radarr:7878
+  
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
 
 # Prowlarr
 prowlarr.fritter.lol {
-    reverse_proxy prowlarr:9696
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
+  reverse_proxy prowlarr:9696
+  
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
 
 # Cloud Commander
 files.fritter.lol {
-    reverse_proxy cloudcmd:8000
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
+  reverse_proxy cloudcmd:8000
+  
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
 
 # qBittorrent
 qb.fritter.lol {
-    reverse_proxy qbittorrent:8080
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
-}
-
-# Plex
-plex.fritter.lol {
-    reverse_proxy plex:32400
-
-    log {
-        output file /var/log/caddy/access.log
-        format json
-    }
+  reverse_proxy qbittorrent:8080
+  
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
 
 # Jellyfin
 jellyfin.fritter.lol {
   reverse_proxy jellyfin:8096
+  
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
 
 # Jellyseerr
 jellyseerr.fritter.lol {
   reverse_proxy jellyseerr:5055
+  
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
 }
 
 # Bazarr
@@ -186,8 +179,4 @@ prometheus.fritter.lol {
     output file /var/log/caddy/access.log
     format json
   }
-}
-
-tautulli.fritter.lol {
-    reverse_proxy tautulli:8181
 }
