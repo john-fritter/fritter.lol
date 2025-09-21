@@ -2,6 +2,7 @@
 
 import express from 'express';
 import fetch from 'node-fetch';
+import Database from 'better-sqlite3';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -22,16 +23,14 @@ app.use((req, res, next) => {
   next();
 });
 
-const TAUTULLI_URL = process.env.TAUTULLI_URL;       // e.g. http://tautulli:8181
-const TAUTULLI_KEY = process.env.TAUTULLI_KEY;       // from Tautulli UI
-const OVERSEERR_URL = process.env.OVERSEERR_URL;     // optional here
-const OVERSEERR_KEY = process.env.OVERSEERR_KEY;
-const PLEX_URL = process.env.PLEX_URL;               // e.g. http://plex:32400
-const PLEX_TOKEN = process.env.PLEX_TOKEN;           // Plex authentication token
+// Jellyfin configuration
+const JELLYFIN_URL = process.env.JELLYFIN_URL;       // e.g. http://jellyfin:8096
+const JELLYFIN_TOKEN = process.env.JELLYFIN_TOKEN;   // Jellyfin API token
+const JELLYFIN_USER_ID = process.env.JELLYFIN_USER_ID; // Jellyfin user ID
+const JELLYFIN_DB_PATH = process.env.JELLYFIN_DB_PATH; // Path to jellyfin.db file
 
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 1500);
-const hasTautulliEnv = !!(TAUTULLI_URL && TAUTULLI_KEY);
-const hasPlexEnv = !!(PLEX_URL && PLEX_TOKEN);
+const hasJellyfinEnv = !!(JELLYFIN_URL && JELLYFIN_TOKEN && JELLYFIN_USER_ID);
 
 // --- tiny cache ---
 const cache = new Map();
@@ -54,51 +53,152 @@ async function safeFetchJson(url, opts = {}, timeout = TIMEOUT_MS) {
   } finally { clearTimeout(t); }
 }
 
-// Normalize “array-like” values
-const arr = (v) => Array.isArray(v) ? v
-  : (v && Array.isArray(v.data)) ? v.data
-  : (v && typeof v === 'object') ? Object.values(v)
-  : [];
 
-// Try to find a watched timestamp on a history item
-function getWatchedAt(x) {
-  // common Tautulli fields: date, started, time, last_played, viewed_at
-  const candidates = [
-    x.viewed_at, x.date, x.started, x.time, x.last_played,
-    x.played_at, x.event_time
-  ];
-  for (const c of candidates) {
-    if (!c) continue;
-    // Epoch (s)
-    if (typeof c === 'number' && c > 100000 && c < 9999999999) return c * 1000;
-    // Epoch (ms)
-    if (typeof c === 'number' && c >= 9999999999) return c;
-    // Parsable string
-    const t = Date.parse(c);
-    if (!Number.isNaN(t)) return t;
+// Build a poster via Jellyfin directly (never expose upstream tokens to the browser)
+function posterFromJellyfin(item) {
+  if (!hasJellyfinEnv) return null;
+  
+  // Jellyfin image API: /Items/{ItemId}/Images/{ImageType}
+  const imageId = item.ImageTags?.Primary || item.ImageTags?.Thumb;
+  if (imageId && item.Id) {
+    const jellyfinUrl = `${JELLYFIN_URL}/Items/${item.Id}/Images/Primary?height=450&width=300&quality=96&tag=${imageId}`;
+    console.log(`Building Jellyfin poster URL for item ${item.Id}: ${item.Name}`);
+    return `/api/media/img?u=${encodeURIComponent(jellyfinUrl)}&auth=jellyfin`;
   }
+  
+  console.log(`No valid poster source found for Jellyfin item:`, item.Name || item.Id);
   return null;
 }
 
-// Build a poster via Plex directly (never expose upstream tokens to the browser)
-function posterFromTautulli(raw) {
-  if (!hasPlexEnv) return null;
+// Helper to make authenticated Jellyfin API requests
+async function jellyfinRequest(endpoint, timeout = TIMEOUT_MS) {
+  if (!hasJellyfinEnv) return { ok: false, error: 'jellyfin not configured' };
   
-  // absolute url?
-  if (raw?.thumb_url?.startsWith('http')) {
-    console.log(`Building poster URL from thumb_url: ${raw.thumb_url}`);
-    return `/api/media/img?u=${encodeURIComponent(raw.thumb_url)}`;
+  const url = `${JELLYFIN_URL}${endpoint}`;
+  const headers = {
+    'Authorization': `MediaBrowser Token="${JELLYFIN_TOKEN}"`,
+    'Accept': 'application/json'
+  };
+  
+  return await safeFetchJson(url, { headers }, timeout);
+}
+
+// --- SQLite database functions for Playback Reporting plugin ---
+function openJellyfinDatabase() {
+  if (!JELLYFIN_DB_PATH) {
+    throw new Error('JELLYFIN_DB_PATH not configured');
   }
   
-  // PMS thumb path - connect directly to Plex with authentication
-  if (raw?.thumb?.startsWith('/')) {
-    const plexUrl = `${PLEX_URL}${raw.thumb}?width=300&height=450&X-Plex-Token=${PLEX_TOKEN}`;
-    console.log(`Building poster URL from thumb: ${raw.thumb} -> ${PLEX_URL}${raw.thumb}?width=300&height=450&X-Plex-Token=[REDACTED]`);
-    return `/api/media/img?u=${encodeURIComponent(plexUrl)}`;
+  try {
+    const db = new Database(JELLYFIN_DB_PATH, { readonly: true });
+    return db;
+  } catch (error) {
+    throw new Error(`Failed to open Jellyfin database: ${error.message}`);
+  }
+}
+
+function getPlaybackEvents(db, daysBack = 30) {
+  try {
+    // Try different possible table names and column names that the Playback Reporting plugin might use
+    const possibleQueries = [
+      // Common Playback Reporting plugin table structure
+      `SELECT DateCreated as timestamp FROM PlaybackReporting_PlaybackActivity WHERE DateCreated >= datetime('now', '-${daysBack} days')`,
+      `SELECT DatePlayed as timestamp FROM PlaybackReporting_PlaybackActivity WHERE DatePlayed >= datetime('now', '-${daysBack} days')`,
+      `SELECT PlaybackReportingId, DateCreated as timestamp FROM PlaybackReporting_PlaybackActivity WHERE DateCreated >= datetime('now', '-${daysBack} days')`,
+      // Alternative table names
+      `SELECT DateCreated as timestamp FROM PlaybackActivity WHERE DateCreated >= datetime('now', '-${daysBack} days')`,
+      `SELECT DatePlayed as timestamp FROM PlaybackActivity WHERE DatePlayed >= datetime('now', '-${daysBack} days')`,
+      // Fallback to any table with playback in the name
+      `SELECT DateCreated as timestamp FROM sqlite_master WHERE type='table' AND name LIKE '%playback%'`
+    ];
+
+    for (const query of possibleQueries) {
+      try {
+        const stmt = db.prepare(query);
+        const rows = stmt.all();
+        if (rows && rows.length > 0) {
+          console.log(`Successfully queried playback data: ${rows.length} events found`);
+          return rows.map(row => ({
+            timestamp: new Date(row.timestamp)
+          })).filter(event => !isNaN(event.timestamp.getTime()));
+        }
+      } catch (queryError) {
+        // Continue to next query if this one fails
+        continue;
+      }
+    }
+    
+    // If no queries worked, let's see what tables are available
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+    console.log('Available tables in Jellyfin database:', tables.map(t => t.name));
+    
+    return [];
+  } catch (error) {
+    console.error('Error querying playback events:', error.message);
+    return [];
+  }
+}
+
+function buildWeeklyActivityData(events) {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
+  const data = {};
+  
+  // Initialize all buckets to 0
+  for (const day of days) {
+    for (const block of timeBlocks) {
+      data[`${day}_${block}`] = 0;
+    }
   }
   
-  console.log(`No valid poster source found in:`, raw);
-  return null;
+  // Count events in each bucket
+  for (const event of events) {
+    const date = event.timestamp;
+    const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const hour = date.getHours();
+    
+    // Convert JavaScript day (0=Sunday) to our format (0=Monday)
+    const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const dayName = days[dayIndex];
+    
+    // Determine time block
+    const blockIndex = Math.floor(hour / 3);
+    const blockName = timeBlocks[blockIndex];
+    
+    const key = `${dayName}_${blockName}`;
+    if (data[key] !== undefined) {
+      data[key]++;
+    }
+  }
+  
+  return data;
+}
+
+function buildMonthlyActivityData(events) {
+  const data = {};
+  const now = new Date();
+  
+  // Initialize all days to 0 (day_1 = today, day_30 = 30 days ago)
+  for (let i = 1; i <= 30; i++) {
+    data[`day_${i}`] = 0;
+  }
+  
+  // Count events for each day
+  for (const event of events) {
+    const eventDate = event.timestamp;
+    const diffTime = now.getTime() - eventDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Only count events from the last 30 days
+    if (diffDays >= 0 && diffDays < 30) {
+      const dayKey = `day_${30 - diffDays}`; // day_30 = 30 days ago, day_1 = today
+      if (data[dayKey] !== undefined) {
+        data[dayKey]++;
+      }
+    }
+  }
+  
+  return data;
 }
 
 // --- diagnostics ---
@@ -107,24 +207,34 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Add the health check on the /api/media path too
 apiRouter.get('/health', (req, res) => res.json({
-  ok: true, hasTautulli: hasTautulliEnv, timeoutMs: TIMEOUT_MS
+  ok: true, 
+  hasJellyfin: hasJellyfinEnv,
+  timeoutMs: TIMEOUT_MS
 }));
 
 apiRouter.get('/img', async (req, res) => {
   try {
     const u = req.query.u;
+    const auth = req.query.auth;
     if (!u) return res.status(400).json({ error: 'missing u' });
     
-    console.log(`Image proxy request for: ${u}`);
+    console.log(`Image proxy request for: ${u} (auth: ${auth || 'none'})`);
     
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), TIMEOUT_MS);
     
+    const headers = {
+      'User-Agent': 'media-proxy/1.0'
+    };
+    
+    // Add Jellyfin authentication if needed
+    if (auth === 'jellyfin') {
+      headers['Authorization'] = `MediaBrowser Token="${JELLYFIN_TOKEN}"`;
+    }
+    
     const r = await fetch(u, { 
       signal: ac.signal,
-      headers: {
-        'User-Agent': 'media-proxy/1.0'
-      }
+      headers
     });
     
     clearTimeout(t);
@@ -149,33 +259,45 @@ apiRouter.get('/img', async (req, res) => {
 
 // --- Recently watched (most recent plays across users) ---
 apiRouter.get('/recently-watched', async (req, res) => {
-  if (!hasTautulliEnv) return res.json({ items: [], warning: 'tautulli not configured' });
+  if (!hasJellyfinEnv) return res.json({ items: [], warning: 'jellyfin not configured' });
 
   const limit = Number(req.query.limit || 12);
-  const key = `watched-${limit}`;
+  const key = `jellyfin-watched-${limit}`;
   const hit = getC(key); if (hit) return res.json(hit);
 
-  // Tautulli history: most installs support cmd=get_history with a list in response.data
-  const r = await safeFetchJson(`${TAUTULLI_URL}/api/v2?apikey=${TAUTULLI_KEY}&cmd=get_history&length=${Math.max(50, limit*3)}`);
-  if (!r.ok) return res.json({ items: [], warning: `tautulli: ${r.error}` });
+  // Get recently played items from Jellyfin
+  const r = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${limit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode`);
+  if (!r.ok) return res.json({ items: [], warning: `jellyfin: ${r.error}` });
 
-  const list = arr(r.json?.response?.data); // tolerate array/object shapes
-  // Map to minimal fields; de-dup consecutive items of same episode/title
+  const list = r.json?.Items || [];
   const items = [];
-  for (const x of list) {
-    const title = x.title || x.full_title || x.media_title || x.grandparent_title || 'Unknown';
-    const gp = x.grandparent_title || null;
-    const t = getWatchedAt(x);
-    const poster = posterFromTautulli(x) || posterFromTautulli({ thumb_url: x.thumb_url, thumb: x.thumb });
+  
+  for (const item of list) {
+    // Only include items that have been played
+    if (!item.UserData?.LastPlayedDate) continue;
+    
+    let title = item.Name || 'Unknown';
+    let grandparent_title = null;
+    
+    // For TV episodes, show series name and episode title
+    if (item.Type === 'Episode') {
+      grandparent_title = item.SeriesName;
+      if (item.SeasonName && item.IndexNumber) {
+        title = `${item.SeasonName} E${item.IndexNumber} - ${item.Name}`;
+      }
+    }
+    
+    const watchedAt = item.UserData.LastPlayedDate ? new Date(item.UserData.LastPlayedDate).getTime() : null;
+    const poster = posterFromJellyfin(item);
+    
     items.push({
       title,
-      grandparent_title: gp,
-      year: x.year || null,
-      watched_at: t,
-      media_type: x.media_type || x.section_type || '',
+      grandparent_title,
+      year: item.ProductionYear || null,
+      watched_at: watchedAt,
+      media_type: item.Type?.toLowerCase() || '',
       poster
     });
-    if (items.length >= limit) break;
   }
 
   // Sort newest first if timestamps exist
@@ -186,102 +308,51 @@ apiRouter.get('/recently-watched', async (req, res) => {
   res.json(payload);
 });
 
-// --- Activity counts per day (last N days) ---
-apiRouter.get('/activity/daily', async (req, res) => {
-  if (!hasTautulliEnv) return res.json({ days: [], counts: [] });
-
-  const days = Number(req.query.days || 7);
-  const key = `activity-${days}`;
-  const hit = getC(key); if (hit) return res.json(hit);
-
-  const r = await safeFetchJson(`${TAUTULLI_URL}/api/v2?apikey=${TAUTULLI_KEY}&cmd=get_history&length=${Math.max(250, days*40)}`);
-  if (!r.ok) return res.json({ days: [], counts: [], warning: `tautulli: ${r.error}` });
-
-  const list = arr(r.json?.response?.data);
-  const buckets = new Map(); // key: YYYY-MM-DD -> count
-  const today = new Date(); today.setHours(0,0,0,0);
-
-  // seed last N days with zeros
-  for (let i=days-1; i>=0; i--) {
-    const d = new Date(today.getTime() - i*86400000);
-    const k = d.toISOString().slice(0,10);
-    buckets.set(k, 0);
-  }
-
-  for (const x of list) {
-    const t = getWatchedAt(x);
-    if (!t) continue;
-    const d = new Date(t); d.setHours(0,0,0,0);
-    const k = d.toISOString().slice(0,10);
-    if (buckets.has(k)) buckets.set(k, buckets.get(k)+1);
-  }
-
-  const outDays = Array.from(buckets.keys());
-  const counts = Array.from(buckets.values());
-  const payload = { days: outDays, counts };
-  setC(key, payload, 15000);
-  res.json(payload);
-});
+// --- Activity endpoints removed (were Tautulli-dependent) ---
 
 // --- Recently added (most recent additions across libraries) ---
 apiRouter.get('/recently-added', async (req, res) => {
-  if (!hasTautulliEnv) return res.json({ items: [], warning: 'tautulli not configured' });
+  if (!hasJellyfinEnv) return res.json({ items: [], warning: 'jellyfin not configured' });
 
   const limit = Number(req.query.limit || 10);
-  const key = `added-${limit}`;
+  const key = `jellyfin-added-${limit}`;
   const hit = getC(key); if (hit) return res.json(hit);
 
-  // Tautulli recently_added: most installs support cmd=get_recently_added with a list in response.data
-  const r = await safeFetchJson(`${TAUTULLI_URL}/api/v2?apikey=${TAUTULLI_KEY}&cmd=get_recently_added&count=${Math.max(30, limit*2)}`);
-  if (!r.ok) return res.json({ items: [], warning: `tautulli: ${r.error}` });
+  // Get recently added items from Jellyfin
+  const r = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items/Latest?Limit=${limit}&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+  if (!r.ok) return res.json({ items: [], warning: `jellyfin: ${r.error}` });
 
-  // The data is nested under recently_added, not directly in data
-  const list = arr(r.json?.response?.data?.recently_added); // tolerate array/object shapes
-  console.log(`Recently added raw data count: ${list.length}`);
-  if (list.length > 0) {
-    console.log('First recently added item:', JSON.stringify(list[0], null, 2));
-  }
-  
-  // Map to minimal fields
+  const list = r.json || [];
   const items = [];
-  for (const x of list) {
-    // Based on the actual Tautulli data structure:
-    // For seasons: use parent_title (show name) + title (season)
-    // For movies: use title directly
-    let displayTitle;
-    if (x.media_type === 'season' && x.parent_title) {
-      displayTitle = `${x.parent_title} — ${x.title}`;
-    } else if (x.media_type === 'movie') {
-      displayTitle = x.title || x.original_title || 'Unknown Movie';
-    } else {
-      displayTitle = x.title || x.parent_title || x.full_title || 'Unknown';
+  
+  for (const item of list) {
+    let title = item.Name || 'Unknown';
+    let grandparent_title = null;
+    
+    // For TV episodes/seasons, show series name
+    if (item.Type === 'Episode') {
+      grandparent_title = item.SeriesName;
+      if (item.SeasonName && item.IndexNumber) {
+        title = `${item.SeasonName} E${item.IndexNumber} - ${item.Name}`;
+      }
+    } else if (item.Type === 'Season') {
+      grandparent_title = item.SeriesName;
+      title = `${item.Name}`;
     }
     
-    const gp = x.parent_title || x.grandparent_title || null;
+    const addedAt = item.DateCreated ? new Date(item.DateCreated).getTime() : Date.now();
+    const poster = posterFromJellyfin(item);
     
-    // Convert epoch timestamp to milliseconds
-    let added = x.added_at;
-    if (typeof added === 'string') {
-      added = parseInt(added) * 1000; // Convert from seconds to milliseconds
-    } else if (typeof added === 'number' && added < 9999999999) {
-      added = added * 1000; // Convert from seconds to milliseconds
-    }
-    if (!added) added = Date.now();
-    
-    // Use the thumb field for poster
-    const poster = posterFromTautulli({ thumb: x.thumb }) || posterFromTautulli({ thumb: x.parent_thumb }) || null;
-    
-    console.log(`Recently added item: ${displayTitle} (${x.media_type || 'unknown type'}) - poster: ${poster ? 'yes' : 'no'}`);
+    console.log(`Jellyfin recently added item: ${title} (${item.Type || 'unknown type'}) - poster: ${poster ? 'yes' : 'no'}`);
     
     items.push({
-      title: displayTitle,
-      grandparent_title: gp,
-      year: x.year || null,
-      added_at: added,
-      media_type: x.media_type || '',
+      title,
+      grandparent_title,
+      year: item.ProductionYear || null,
+      added_at: addedAt,
+      media_type: item.Type?.toLowerCase() || '',
       poster
     });
-    if (items.length >= limit) break;
   }
 
   // Sort newest first if timestamps exist
@@ -292,121 +363,92 @@ apiRouter.get('/recently-added', async (req, res) => {
   res.json(payload);
 });
 
-// --- Weekly Activity (7x8 grid of time blocks) ---
+// Activity endpoints using Jellyfin Playback Reporting plugin data
 apiRouter.get('/activity/weekly', async (req, res) => {
-  if (!hasTautulliEnv) return res.json({ data: {}, warning: 'tautulli not configured' });
+  const key = 'jellyfin-activity-weekly';
+  const hit = getC(key); 
+  if (hit) return res.json(hit);
 
-  const key = 'activity-weekly';
-  const hit = getC(key); if (hit) return res.json(hit);
-
-  // Helper function to create empty weekly data grid
-  function createEmptyWeeklyData() {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
-    const emptyData = {};
-    
-    for (const day of days) {
-      for (const block of timeBlocks) {
-        emptyData[`${day}_${block}`] = 0;
-      }
-    }
-    return emptyData;
-  }
-
-  let r;
-  try {
-    r = await safeFetchJson(`${TAUTULLI_URL}/api/v2?apikey=${TAUTULLI_KEY}&cmd=get_history&length=500`);
-    if (!r.ok) return res.json({ data: createEmptyWeeklyData(), warning: `tautulli: ${r.error}` });
-  } catch (err) {
-    console.error('Error fetching weekly data:', err);
-    return res.json({ data: createEmptyWeeklyData(), warning: `tautulli connection error` });
-  }
-
-  const list = arr(r.json?.response?.data);
+  // Fallback empty data structure
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
-  const weekData = {};
+  const emptyData = {};
   
-  // Initialize all time blocks with zero
   for (const day of days) {
     for (const block of timeBlocks) {
-      weekData[`${day}_${block}`] = 0;
+      emptyData[`${day}_${block}`] = 0;
     }
   }
-  
-  // Calculate a week ago from now
-  const now = Date.now();
-  const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
-  
-  for (const x of list) {
-    const t = getWatchedAt(x);
-    if (!t || t < weekAgo) continue;
-    
-    const date = new Date(t);
-    const day = days[date.getDay() === 0 ? 6 : date.getDay() - 1]; // Convert to Mon-Sun
-    const hour = date.getHours();
-    const blockIndex = Math.floor(hour / 3);
-    const block = timeBlocks[blockIndex];
-    
-    const key = `${day}_${block}`;
-    weekData[key] = (weekData[key] || 0) + 1;
-  }
 
-  const payload = { data: weekData };
-  setC(key, payload, 30000);
-  res.json(payload);
+  try {
+    if (!JELLYFIN_DB_PATH) {
+      const payload = { data: emptyData, warning: 'JELLYFIN_DB_PATH not configured' };
+      setC(key, payload, 30000);
+      return res.json(payload);
+    }
+
+    const db = openJellyfinDatabase();
+    const events = getPlaybackEvents(db, 7); // Last 7 days for weekly view
+    db.close();
+    
+    if (events.length === 0) {
+      const payload = { data: emptyData, warning: 'No playback events found in Jellyfin database' };
+      setC(key, payload, 30000);
+      return res.json(payload);
+    }
+
+    const activityData = buildWeeklyActivityData(events);
+    const payload = { data: activityData };
+    setC(key, payload, 30000); // Cache for 30 seconds
+    res.json(payload);
+    
+  } catch (error) {
+    console.error('Error reading Jellyfin playback data for weekly activity:', error.message);
+    const payload = { data: emptyData, warning: `Database error: ${error.message}` };
+    setC(key, payload, 30000);
+    res.json(payload);
+  }
 });
 
-// --- Monthly Activity (GitHub-style calendar) ---
 apiRouter.get('/activity/monthly', async (req, res) => {
-  if (!hasTautulliEnv) return res.json({ data: {}, warning: 'tautulli not configured' });
+  const key = 'jellyfin-activity-monthly';
+  const hit = getC(key);
+  if (hit) return res.json(hit);
 
-  const key = 'activity-monthly';
-  const hit = getC(key); if (hit) return res.json(hit);
-
-  // Helper function to create empty monthly data
-  function createEmptyMonthlyData() {
-    const emptyData = {};
-    for (let i = 0; i < 30; i++) {
-      emptyData[`day_${i+1}`] = 0;
-    }
-    return emptyData;
+  // Fallback empty data structure
+  const emptyData = {};
+  for (let i = 1; i <= 30; i++) {
+    emptyData[`day_${i}`] = 0;
   }
 
-  let r;
   try {
-    r = await safeFetchJson(`${TAUTULLI_URL}/api/v2?apikey=${TAUTULLI_KEY}&cmd=get_history&length=800`);
-    if (!r.ok) return res.json({ data: createEmptyMonthlyData(), warning: `tautulli: ${r.error}` });
-  } catch (err) {
-    console.error('Error fetching monthly data:', err);
-    return res.json({ data: createEmptyMonthlyData(), warning: `tautulli connection error` });
-  }
-
-  const list = arr(r.json?.response?.data);
-  const monthData = {};
-  
-  // Initialize last 30 days with zero
-  const now = Date.now();
-  for (let i = 0; i < 30; i++) {
-    monthData[`day_${i+1}`] = 0;
-  }
-  
-  const monthAgo = now - (30 * 24 * 60 * 60 * 1000);
-  
-  for (const x of list) {
-    const t = getWatchedAt(x);
-    if (!t || t < monthAgo) continue;
-    
-    const daysAgo = Math.floor((now - t) / (24 * 60 * 60 * 1000));
-    if (daysAgo < 30) {
-      const dayKey = `day_${30 - daysAgo}`;
-      monthData[dayKey] = (monthData[dayKey] || 0) + 1;
+    if (!JELLYFIN_DB_PATH) {
+      const payload = { data: emptyData, warning: 'JELLYFIN_DB_PATH not configured' };
+      setC(key, payload, 30000);
+      return res.json(payload);
     }
-  }
 
-  const payload = { data: monthData };
-  setC(key, payload, 30000);
-  res.json(payload);
+    const db = openJellyfinDatabase();
+    const events = getPlaybackEvents(db, 30); // Last 30 days for monthly view
+    db.close();
+    
+    if (events.length === 0) {
+      const payload = { data: emptyData, warning: 'No playback events found in Jellyfin database' };
+      setC(key, payload, 30000);
+      return res.json(payload);
+    }
+
+    const activityData = buildMonthlyActivityData(events);
+    const payload = { data: activityData };
+    setC(key, payload, 30000); // Cache for 30 seconds
+    res.json(payload);
+    
+  } catch (error) {
+    console.error('Error reading Jellyfin playback data for monthly activity:', error.message);
+    const payload = { data: emptyData, warning: `Database error: ${error.message}` };
+    setC(key, payload, 30000);
+    res.json(payload);
+  }
 });
 
 // Debug routes to help diagnose issues
@@ -414,18 +456,21 @@ app.get('/', (req, res) => {
   res.json({ message: 'API server running. Use /api/media/* routes to access endpoints.' });
 });
 
-// Debug endpoint to see raw Tautulli data
-apiRouter.get('/debug/tautulli-recently-added', async (req, res) => {
-  if (!hasTautulliEnv) return res.json({ error: 'tautulli not configured' });
+// Debug endpoint for Jellyfin data
+apiRouter.get('/debug/jellyfin-info', async (req, res) => {
+  if (!hasJellyfinEnv) return res.json({ error: 'jellyfin not configured' });
   
   try {
-    const r = await safeFetchJson(`${TAUTULLI_URL}/api/v2?apikey=${TAUTULLI_KEY}&cmd=get_recently_added&count=5`);
-    if (!r.ok) return res.json({ error: `tautulli: ${r.error}` });
+    const r = await jellyfinRequest(`/System/Info`);
+    if (!r.ok) return res.json({ error: `jellyfin: ${r.error}` });
     
     return res.json({
       success: true,
-      raw_response: r.json,
-      processed_list: arr(r.json?.response?.data)
+      server_info: {
+        version: r.json?.Version,
+        name: r.json?.ServerName,
+        id: r.json?.Id
+      }
     });
   } catch (err) {
     return res.json({ error: err.message });
@@ -461,7 +506,6 @@ app.get('/debug-routes', (req, res) => {
   res.json({ routes });
 });
 
-// (keep old endpoints if you want; otherwise we're done)
 
 // Print all registered routes on startup
 console.log('\n===== REGISTERED ROUTES =====');

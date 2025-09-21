@@ -145,6 +145,16 @@ plex.fritter.lol {
     }
 }
 
+# Jellyfin
+jellyfin.fritter.lol {
+  reverse_proxy jellyfin:8096
+}
+
+# Jellyseerr
+jellyseerr.fritter.lol {
+  reverse_proxy jellyseerr:5055
+}
+
 # Bazarr
 bazarr.fritter.lol {
   reverse_proxy bazarr:6767

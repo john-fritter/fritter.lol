@@ -32,8 +32,8 @@
       <div class="row">
         <h2 style="margin:0">Media Hub</h2>
         <div class="btn-row">
-          <a class="btn" href="https://plex.fritter.lol">Open Plex</a>
-          <a class="btn" href="https://overseerr.fritter.lol">Open Overseerr</a>
+          <a class="btn" href="https://jellyfin.fritter.lol">Open Jellyfin</a>
+          <a class="btn" href="https://jellyseerr.fritter.lol">Open Jellyseerr</a>
         </div>
       </div>
       <p class="muted">A public peek at what’s been watched lately and weekly activity. No private details shown.</p>
@@ -41,12 +41,12 @@
 
     <section class="grid-2">
       <div class="card">
-        <div class="row"><h3 style="margin:0">Recently Watched</h3><span class="pill">via Tautulli → Plex</span></div>
+        <div class="row"><h3 style="margin:0">Recently Watched</h3><span class="pill">via Jellyfin</span></div>
         <div id="watched" class="poster-grid"></div>
       </div>
 
       <div class="card">
-        <div class="row"><h3 style="margin:0">Recently Added</h3><span class="pill">via Plex</span></div>
+        <div class="row"><h3 style="margin:0">Recently Added</h3><span class="pill">via Jellyfin</span></div>
         <div id="added" class="poster-grid"></div>
       </div>
     </section>
@@ -169,7 +169,7 @@
         const watchedItems = watched.items || [];
         $('#watched').innerHTML = watchedItems.length
           ? watchedItems.map(tile).join('')
-          : `<div class="muted">No watch history yet. Start something in Plex!</div>`;
+          : `<div class="muted">No watch history yet. Start something in Jellyfin!</div>`;
 
         // Recently added tiles
         const addedItems = added.items || [];
@@ -179,11 +179,19 @@
 
         // Weekly activity grid (7x8)
         const weeklyData = weeklyActivity.data || {};
-        $('#weeklyGrid').innerHTML = drawWeeklyGrid(weeklyData);
+        if (weeklyActivity.warning) {
+          $('#weeklyGrid').innerHTML = `<div class="muted">${weeklyActivity.warning}</div>`;
+        } else {
+          $('#weeklyGrid').innerHTML = drawWeeklyGrid(weeklyData);
+        }
         
         // Monthly activity grid
         const monthlyData = monthlyActivity.data || {};
-        $('#monthlyGrid').innerHTML = drawMonthlyGrid(monthlyData);
+        if (monthlyActivity.warning) {
+          $('#monthlyGrid').innerHTML = `<div class="muted">${monthlyActivity.warning}</div>`;
+        } else {
+          $('#monthlyGrid').innerHTML = drawMonthlyGrid(monthlyData);
+        }
 
       } catch(e){
         console.error(e);
