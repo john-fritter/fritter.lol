@@ -267,10 +267,23 @@ function getRecentPlaybackRows(db, limit = 12) {
         .find((c) => cols.includes(c));
       const itemNameCol = ['ItemName', 'Name', 'Title']
         .find((c) => cols.includes(c));
+      const userIdCol = ['UserId', 'UserID', 'UserInternalId']
+        .find((c) => cols.includes(c));
+      const userNameCol = ['UserName', 'Username']
+        .find((c) => cols.includes(c));
+      const clientCol = ['ClientName', 'AppName', 'ApplicationName']
+        .find((c) => cols.includes(c));
+      const deviceCol = ['DeviceName', 'Device', 'DeviceId', 'DeviceID']
+        .find((c) => cols.includes(c));
 
       const selectItemId = itemIdCol ? `${itemIdCol} as item_id` : `NULL as item_id`;
       const selectItemName = itemNameCol ? `${itemNameCol} as item_name` : `NULL as item_name`;
+      const selectUserId = userIdCol ? `${userIdCol} as user_id` : `NULL as user_id`;
+      const selectUserName = userNameCol ? `${userNameCol} as user_name` : `NULL as user_name`;
+      const selectClient = clientCol ? `${clientCol} as client_name` : `NULL as client_name`;
+      const selectDevice = deviceCol ? `${deviceCol} as device_name` : `NULL as device_name`;
       const query = `SELECT ${selectItemId}, ${selectItemName}, ${playedCol} as played_at
+        , ${selectUserId}, ${selectUserName}, ${selectClient}, ${selectDevice}
         FROM ${tableName}
         WHERE ${playedCol} IS NOT NULL
         ORDER BY ${playedCol} DESC
@@ -285,7 +298,11 @@ function getRecentPlaybackRows(db, limit = 12) {
         return {
           item_id: row.item_id ? String(row.item_id) : null,
           item_name: row.item_name ? String(row.item_name) : null,
-          played_at: playedAt
+          played_at: playedAt,
+          user_id: row.user_id ? String(row.user_id) : null,
+          user_name: row.user_name ? String(row.user_name) : null,
+          client_name: row.client_name ? String(row.client_name) : null,
+          device_name: row.device_name ? String(row.device_name) : null
         };
       }).filter(Boolean);
 
@@ -345,7 +362,11 @@ async function getRecentWatchedFromPlaybackDb(limit = 12, resultLimit = limit) {
         year: source.ProductionYear || null,
         watched_at: row.played_at.getTime(),
         media_type: source.Type?.toLowerCase() || '',
-        poster: detail ? posterFromJellyfin(source) : null
+        poster: detail ? posterFromJellyfin(source) : null,
+        db_user_id: row.user_id || null,
+        db_user_name: row.user_name || null,
+        db_client_name: row.client_name || null,
+        db_device_name: row.device_name || null
       });
     }
 
@@ -776,6 +797,68 @@ apiRouter.get('/debug/jellyfin-info', async (req, res) => {
   } catch (err) {
     return res.json({ error: err.message });
   }
+});
+
+apiRouter.get('/debug/recent-playback-sources', async (req, res) => {
+  const limit = Number(req.query.limit || 50);
+  const out = {
+    pipeline_version: WATCH_PIPELINE_VERSION,
+    limit,
+    users: [],
+    all_users_api_items: [],
+    db_rows: [],
+    db_error: null
+  };
+
+  try {
+    const usersResp = await jellyfinRequest('/Users');
+    if (usersResp.ok && Array.isArray(usersResp.json)) {
+      const users = usersResp.json.filter((u) => u && u.Id).map((u) => ({ id: u.Id, name: u.Name || null }));
+      out.users = users;
+
+      const perUser = await Promise.all(users.map(async (u) => {
+        const r = await jellyfinRequest(`/Users/${u.id}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${Math.max(limit, 20)}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode,Video`);
+        if (!r.ok) return [];
+        const items = Array.isArray(r.json?.Items) ? r.json.Items : [];
+        return items
+          .filter((i) => i.UserData?.LastPlayedDate)
+          .map((i) => ({
+            user_id: u.id,
+            user_name: u.name,
+            item_id: i.Id || null,
+            title: i.Name || null,
+            media_type: i.Type || null,
+            watched_at: new Date(i.UserData.LastPlayedDate).getTime()
+          }));
+      }));
+
+      out.all_users_api_items = perUser.flat().sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0)).slice(0, limit);
+    }
+  } catch (e) {
+    out.users_error = e.message;
+  }
+
+  try {
+    const db = openJellyfinDatabase();
+    const rows = getRecentPlaybackRows(db, Math.max(limit, 20));
+    db.close();
+    out.db_rows = rows
+      .sort((a, b) => (b.played_at?.getTime() || 0) - (a.played_at?.getTime() || 0))
+      .slice(0, limit)
+      .map((r) => ({
+        item_id: r.item_id || null,
+        title: r.item_name || null,
+        watched_at: r.played_at?.getTime() || null,
+        user_id: r.user_id || null,
+        user_name: r.user_name || null,
+        client_name: r.client_name || null,
+        device_name: r.device_name || null
+      }));
+  } catch (e) {
+    out.db_error = e.message;
+  }
+
+  res.json(out);
 });
 
 app.get('/debug-routes', (req, res) => {
