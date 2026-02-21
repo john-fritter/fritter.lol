@@ -493,19 +493,26 @@ apiRouter.get('/recently-watched', async (req, res) => {
 
   // Merge A + B for better client coverage.
   const merged = [];
-  const seen = new Set();
+  const recentByMediaKey = new Map();
   const combined = [
     ...(allUsersResult.ok ? allUsersResult.items : []),
     ...(dbResult.ok ? dbResult.items : [])
   ].sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
 
+  // Cross-source de-dupe window: same title/item often appears twice with timezone offsets.
+  const DUP_WINDOW_MS = 12 * 60 * 60 * 1000;
   for (const item of combined) {
-    const keyPartId = item.id || '';
-    const keyPartTitle = item.title || '';
-    const keyPartTime = item.watched_at || 0;
-    const dedupeKey = `${keyPartId}:${keyPartTitle}:${keyPartTime}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
+    const mediaKey = item.id
+      ? `id:${item.id}`
+      : `title:${item.grandparent_title || ''}:${item.title || ''}`;
+    const ts = Number(item.watched_at || 0);
+
+    const lastTsForMedia = recentByMediaKey.get(mediaKey);
+    if (lastTsForMedia && Math.abs(lastTsForMedia - ts) <= DUP_WINDOW_MS) {
+      continue;
+    }
+    recentByMediaKey.set(mediaKey, ts);
+
     merged.push(item);
     if (merged.length >= limit) break;
   }
