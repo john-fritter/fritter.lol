@@ -31,6 +31,7 @@ const JELLYFIN_DB_PATH = process.env.JELLYFIN_DB_PATH; // Path to jellyfin.db fi
 
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 1500);
 const hasJellyfinEnv = !!(JELLYFIN_URL && JELLYFIN_TOKEN && JELLYFIN_USER_ID);
+const WATCH_PIPELINE_VERSION = 'watch-v5-debug';
 
 // --- tiny cache ---
 const cache = new Map();
@@ -482,8 +483,9 @@ apiRouter.get('/recently-watched', async (req, res) => {
   if (!hasJellyfinEnv) return res.json({ items: [], warning: 'jellyfin not configured' });
 
   const limit = Number(req.query.limit || 12);
+  const debugMode = String(req.query.debug || '') === '1';
   const key = `jellyfin-watched-v2-${limit}`;
-  const hit = getC(key); if (hit) return res.json(hit);
+  const hit = getC(key); if (hit && !debugMode) return res.json(hit);
 
   // Source A: aggregate recently played items across all users.
   const allUsersResult = await getRecentWatchedAllUsers(limit);
@@ -522,9 +524,29 @@ apiRouter.get('/recently-watched', async (req, res) => {
       items: merged,
       source: (allUsersResult.ok && dbResult.ok)
         ? 'jellyfin-all-users+playback-reporting'
-        : (allUsersResult.ok ? 'jellyfin-all-users' : 'playback-reporting')
+        : (allUsersResult.ok ? 'jellyfin-all-users' : 'playback-reporting'),
+      pipeline_version: WATCH_PIPELINE_VERSION
     };
-    setC(key, payload, 15000);
+    if (debugMode) {
+      payload.debug = {
+        all_users_ok: allUsersResult.ok,
+        all_users_count: allUsersResult.ok ? allUsersResult.items.length : 0,
+        all_users_error: allUsersResult.ok ? null : allUsersResult.error,
+        db_ok: dbResult.ok,
+        db_count: dbResult.ok ? dbResult.items.length : 0,
+        db_error: dbResult.ok ? null : dbResult.error,
+        combined_count: combined.length,
+        merged_count: merged.length,
+        merged_sample: merged.slice(0, Math.min(20, merged.length)).map((item) => ({
+          id: item.id || null,
+          title: item.title || null,
+          watched_at: item.watched_at || null,
+          media_type: item.media_type || null
+        }))
+      };
+    } else {
+      setC(key, payload, 15000);
+    }
     return res.json(payload);
   }
 
@@ -558,8 +580,20 @@ apiRouter.get('/recently-watched', async (req, res) => {
     .sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
 
   const warning = [allUsersResult.error, dbResult.error].filter(Boolean).join(' | ');
-  const payload = { items, source: 'jellyfin-user-fallback', warning };
-  setC(key, payload, 15000);
+  const payload = { items, source: 'jellyfin-user-fallback', warning, pipeline_version: WATCH_PIPELINE_VERSION };
+  if (debugMode) {
+    payload.debug = {
+      all_users_ok: allUsersResult.ok,
+      all_users_count: allUsersResult.ok ? allUsersResult.items.length : 0,
+      all_users_error: allUsersResult.ok ? null : allUsersResult.error,
+      db_ok: dbResult.ok,
+      db_count: dbResult.ok ? dbResult.items.length : 0,
+      db_error: dbResult.ok ? null : dbResult.error,
+      fallback_count: items.length
+    };
+  } else {
+    setC(key, payload, 15000);
+  }
   res.json(payload);
 });
 
