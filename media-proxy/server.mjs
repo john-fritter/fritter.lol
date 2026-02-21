@@ -157,6 +157,96 @@ async function getRecentWatchedAllUsers(limit = 12, resultLimit = limit) {
   return { ok: true, items: deduped };
 }
 
+async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) {
+  const fetchLimit = Math.max(limit * 10, 120);
+  const r = await jellyfinRequest(`/System/ActivityLog/Entries?Limit=${fetchLimit}&HasUserId=true`);
+  if (!r.ok) return { ok: false, error: r.error || 'Unable to read Jellyfin activity log' };
+
+  const entries = r.json?.Items || r.json?.items || r.json?.Entries || [];
+  if (!Array.isArray(entries) || !entries.length) {
+    return { ok: false, error: 'No activity log entries found' };
+  }
+
+  const isPlaybackEntry = (entry) => {
+    const hay = `${entry?.Type || ''} ${entry?.Name || ''} ${entry?.ShortOverview || ''} ${entry?.Overview || ''}`.toLowerCase();
+    return hay.includes('playback') || hay.includes('played') || hay.includes('stopped');
+  };
+
+  const normalizeTitle = (entry) => {
+    const candidates = [
+      entry?.ItemName,
+      entry?.Name,
+      entry?.ShortOverview,
+      entry?.Overview
+    ].filter(Boolean);
+    if (!candidates.length) return 'Unknown';
+    let title = String(candidates[0]);
+    title = title.replace(/^[^:]{1,64}:\s*/, ''); // trim leading "user: "
+    return title.trim() || 'Unknown';
+  };
+
+  const rows = entries
+    .filter(isPlaybackEntry)
+    .map((entry) => {
+      const watchedAtDate = normalizeTimestamp(entry?.Date || entry?.DateCreated || entry?.Timestamp || entry?.Time);
+      if (!watchedAtDate) return null;
+      const itemId = entry?.ItemId ? String(entry.ItemId) : null;
+      return {
+        id: itemId,
+        user_id: entry?.UserId ? String(entry.UserId) : null,
+        title: normalizeTitle(entry),
+        grandparent_title: null,
+        year: null,
+        watched_at: watchedAtDate.getTime(),
+        media_type: '',
+        poster: null
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
+
+  if (!rows.length) return { ok: false, error: 'No playback events in activity log' };
+
+  const itemIds = [...new Set(rows.map((x) => x.id).filter(Boolean))].slice(0, Math.max(limit * 3, 30));
+  const detailsMap = new Map();
+
+  await Promise.all(itemIds.map(async (itemId) => {
+    const encoded = encodeURIComponent(itemId);
+    const d = await jellyfinRequest(`/Items/${encoded}?Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+    if (d.ok && d.json?.Id) detailsMap.set(itemId, d.json);
+  }));
+
+  const items = [];
+  for (const row of rows) {
+    if (items.length >= resultLimit) break;
+    const detail = row.id ? detailsMap.get(row.id) : null;
+    if (detail) {
+      let title = detail.Name || row.title;
+      let grandparent_title = null;
+      if (detail.Type === 'Episode') {
+        grandparent_title = detail.SeriesName || null;
+        if (detail.SeasonName && detail.IndexNumber) {
+          title = `${detail.SeasonName} E${detail.IndexNumber} - ${detail.Name || row.title}`;
+        }
+      }
+      items.push({
+        id: detail.Id || row.id || null,
+        user_id: row.user_id || null,
+        title,
+        grandparent_title,
+        year: detail.ProductionYear || null,
+        watched_at: row.watched_at,
+        media_type: detail.Type?.toLowerCase() || '',
+        poster: posterFromJellyfin(detail)
+      });
+    } else {
+      items.push(row);
+    }
+  }
+
+  return { ok: true, items };
+}
+
 // --- SQLite database functions for Playback Reporting plugin ---
 function openJellyfinDatabase() {
   if (!JELLYFIN_DB_PATH) {
@@ -515,12 +605,16 @@ apiRouter.get('/recently-watched', async (req, res) => {
   // Source B: playback-reporting DB (captures events some clients may not reflect in LastPlayedDate order).
   const dbResult = await getRecentWatchedFromPlaybackDb(limit, sourceLimit);
 
+  // Source C: Jellyfin activity log playback events.
+  const activityLogResult = await getRecentWatchedFromActivityLog(limit, sourceLimit);
+
   // Merge A + B for better client coverage.
   const merged = [];
   const recentByMediaKey = new Map();
   const combined = [
     ...(allUsersResult.ok ? allUsersResult.items : []),
-    ...(dbResult.ok ? dbResult.items : [])
+    ...(dbResult.ok ? dbResult.items : []),
+    ...(activityLogResult.ok ? activityLogResult.items : [])
   ].sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
 
   // Cross-source de-dupe window: same title/item often appears twice with timezone offsets.
@@ -548,9 +642,11 @@ apiRouter.get('/recently-watched', async (req, res) => {
   if (merged.length > 0) {
     const payload = {
       items: merged,
-      source: (allUsersResult.ok && dbResult.ok)
-        ? 'jellyfin-all-users+playback-reporting'
-        : (allUsersResult.ok ? 'jellyfin-all-users' : 'playback-reporting'),
+      source: [
+        allUsersResult.ok ? 'all-users' : null,
+        dbResult.ok ? 'playback-reporting' : null,
+        activityLogResult.ok ? 'activity-log' : null
+      ].filter(Boolean).join('+'),
       pipeline_version: WATCH_PIPELINE_VERSION
     };
     if (debugMode) {
@@ -561,6 +657,9 @@ apiRouter.get('/recently-watched', async (req, res) => {
         db_ok: dbResult.ok,
         db_count: dbResult.ok ? dbResult.items.length : 0,
         db_error: dbResult.ok ? null : dbResult.error,
+        activity_ok: activityLogResult.ok,
+        activity_count: activityLogResult.ok ? activityLogResult.items.length : 0,
+        activity_error: activityLogResult.ok ? null : activityLogResult.error,
         combined_count: combined.length,
         merged_count: merged.length,
         merged_sample: merged.slice(0, Math.min(20, merged.length)).map((item) => ({
@@ -606,7 +705,8 @@ apiRouter.get('/recently-watched', async (req, res) => {
     .sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
 
   const warning = [allUsersResult.error, dbResult.error].filter(Boolean).join(' | ');
-  const payload = { items, source: 'jellyfin-user-fallback', warning, pipeline_version: WATCH_PIPELINE_VERSION };
+  const extraWarning = activityLogResult.error ? `${warning ? `${warning} | ` : ''}${activityLogResult.error}` : warning;
+  const payload = { items, source: 'jellyfin-user-fallback', warning: extraWarning, pipeline_version: WATCH_PIPELINE_VERSION };
   if (debugMode) {
     payload.debug = {
       all_users_ok: allUsersResult.ok,
@@ -615,6 +715,9 @@ apiRouter.get('/recently-watched', async (req, res) => {
       db_ok: dbResult.ok,
       db_count: dbResult.ok ? dbResult.items.length : 0,
       db_error: dbResult.ok ? null : dbResult.error,
+      activity_ok: activityLogResult.ok,
+      activity_count: activityLogResult.ok ? activityLogResult.items.length : 0,
+      activity_error: activityLogResult.ok ? null : activityLogResult.error,
       fallback_count: items.length
     };
   } else {

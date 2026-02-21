@@ -482,9 +482,11 @@
     function setWatchSourceBadge(payload) {
       const label = document.querySelector('#watchSource span:last-child');
       if (!label) return;
-      if (payload.source === 'jellyfin-all-users+playback-reporting') return label.textContent = 'Watch source: all-users + playback reporting';
-      if (payload.source === 'jellyfin-all-users') return label.textContent = 'Watch source: Jellyfin all-users';
-      if (payload.source === 'playback-reporting') return label.textContent = 'Watch source: playback reporting (all clients)';
+      const source = String(payload.source || '');
+      if (source.includes('activity-log')) return label.textContent = 'Watch source: all-users + playback DB + activity log';
+      if (source === 'jellyfin-all-users+playback-reporting') return label.textContent = 'Watch source: all-users + playback reporting';
+      if (source === 'jellyfin-all-users' || source === 'all-users') return label.textContent = 'Watch source: Jellyfin all-users';
+      if (source === 'playback-reporting') return label.textContent = 'Watch source: playback reporting (all clients)';
       label.textContent = 'Watch source: Jellyfin single-user fallback';
     }
 
