@@ -100,7 +100,7 @@ async function jellyfinRequest(endpoint, timeout = TIMEOUT_MS) {
   return await safeFetchJson(url, { headers }, timeout);
 }
 
-async function getRecentWatchedAllUsers(limit = 12) {
+async function getRecentWatchedAllUsers(limit = 12, resultLimit = limit) {
   const usersResp = await jellyfinRequest('/Users');
   if (!usersResp.ok || !Array.isArray(usersResp.json) || usersResp.json.length === 0) {
     return { ok: false, error: usersResp.error || 'Unable to read Jellyfin users' };
@@ -109,7 +109,7 @@ async function getRecentWatchedAllUsers(limit = 12) {
   const users = usersResp.json.filter((u) => u && u.Id && !u.Policy?.IsDisabled);
   if (!users.length) return { ok: false, error: 'No enabled Jellyfin users found' };
 
-  const perUserLimit = Math.max(limit * 2, 20);
+  const perUserLimit = Math.max(limit * 3, 30);
   const perUserResults = await Promise.all(users.map(async (user) => {
     const r = await jellyfinRequest(`/Users/${user.Id}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${perUserLimit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode`);
     if (!r.ok) return [];
@@ -151,7 +151,7 @@ async function getRecentWatchedAllUsers(limit = 12) {
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(item);
-    if (deduped.length >= limit) break;
+    if (deduped.length >= resultLimit) break;
   }
 
   return { ok: true, items: deduped };
@@ -298,7 +298,7 @@ function getRecentPlaybackRows(db, limit = 12) {
   return [];
 }
 
-async function getRecentWatchedFromPlaybackDb(limit = 12) {
+async function getRecentWatchedFromPlaybackDb(limit = 12, resultLimit = limit) {
   if (!JELLYFIN_DB_PATH) {
     return { ok: false, error: 'JELLYFIN_DB_PATH not configured' };
   }
@@ -325,7 +325,7 @@ async function getRecentWatchedFromPlaybackDb(limit = 12) {
 
     const items = [];
     for (const row of recentRows) {
-      if (items.length >= limit) break;
+      if (items.length >= resultLimit) break;
       const detail = row.item_id ? detailsMap.get(row.item_id) : null;
       const source = detail || {};
 
@@ -488,10 +488,11 @@ apiRouter.get('/recently-watched', async (req, res) => {
   const hit = getC(key); if (hit && !debugMode) return res.json(hit);
 
   // Source A: aggregate recently played items across all users.
-  const allUsersResult = await getRecentWatchedAllUsers(limit);
+  const sourceLimit = Math.max(limit * 4, 48);
+  const allUsersResult = await getRecentWatchedAllUsers(limit, sourceLimit);
 
   // Source B: playback-reporting DB (captures events some clients may not reflect in LastPlayedDate order).
-  const dbResult = await getRecentWatchedFromPlaybackDb(limit);
+  const dbResult = await getRecentWatchedFromPlaybackDb(limit, sourceLimit);
 
   // Merge A + B for better client coverage.
   const merged = [];
@@ -503,17 +504,21 @@ apiRouter.get('/recently-watched', async (req, res) => {
 
   // Cross-source de-dupe window: same title/item often appears twice with timezone offsets.
   const DUP_WINDOW_MS = 12 * 60 * 60 * 1000;
+  const normalizeTitle = (item) => `${String(item.grandparent_title || '').trim().toLowerCase()}::${String(item.title || '').trim().toLowerCase()}`;
   for (const item of combined) {
-    const mediaKey = item.id
-      ? `id:${item.id}`
-      : `title:${item.grandparent_title || ''}:${item.title || ''}`;
+    const idKey = item.id ? `id:${item.id}` : null;
+    const titleKey = `title:${normalizeTitle(item)}`;
     const ts = Number(item.watched_at || 0);
 
-    const lastTsForMedia = recentByMediaKey.get(mediaKey);
-    if (lastTsForMedia && Math.abs(lastTsForMedia - ts) <= DUP_WINDOW_MS) {
+    const lastById = idKey ? recentByMediaKey.get(idKey) : null;
+    const lastByTitle = recentByMediaKey.get(titleKey);
+    const isDupById = lastById && Math.abs(lastById - ts) <= DUP_WINDOW_MS;
+    const isDupByTitle = lastByTitle && Math.abs(lastByTitle - ts) <= DUP_WINDOW_MS;
+    if (isDupById || isDupByTitle) {
       continue;
     }
-    recentByMediaKey.set(mediaKey, ts);
+    if (idKey) recentByMediaKey.set(idKey, ts);
+    recentByMediaKey.set(titleKey, ts);
 
     merged.push(item);
     if (merged.length >= limit) break;
