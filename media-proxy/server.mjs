@@ -155,6 +155,126 @@ function getPlaybackEvents(db, daysBack = 30) {
   }
 }
 
+function normalizeTimestamp(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function getRecentPlaybackRows(db, limit = 12) {
+  const fetchLimit = Math.max(limit * 6, 30);
+  const queries = [
+    `SELECT ItemId as item_id, ItemName as item_name, DateCreated as played_at
+     FROM PlaybackReporting_PlaybackActivity
+     WHERE DateCreated IS NOT NULL
+     ORDER BY DateCreated DESC
+     LIMIT ${fetchLimit}`,
+    `SELECT ItemId as item_id, ItemName as item_name, DatePlayed as played_at
+     FROM PlaybackReporting_PlaybackActivity
+     WHERE DatePlayed IS NOT NULL
+     ORDER BY DatePlayed DESC
+     LIMIT ${fetchLimit}`,
+    `SELECT ItemId as item_id, ItemName as item_name, DateCreated as played_at
+     FROM PlaybackActivity
+     WHERE DateCreated IS NOT NULL
+     ORDER BY DateCreated DESC
+     LIMIT ${fetchLimit}`,
+    `SELECT ItemId as item_id, ItemName as item_name, DatePlayed as played_at
+     FROM PlaybackActivity
+     WHERE DatePlayed IS NOT NULL
+     ORDER BY DatePlayed DESC
+     LIMIT ${fetchLimit}`
+  ];
+
+  for (const query of queries) {
+    try {
+      const rows = db.prepare(query).all();
+      if (!rows || rows.length === 0) continue;
+      const normalized = rows
+        .map((row) => {
+          const playedAt = normalizeTimestamp(row.played_at);
+          if (!playedAt) return null;
+          return {
+            item_id: row.item_id ? String(row.item_id) : null,
+            item_name: row.item_name ? String(row.item_name) : null,
+            played_at: playedAt
+          };
+        })
+        .filter(Boolean);
+
+      if (normalized.length > 0) {
+        return normalized.slice(0, fetchLimit);
+      }
+    } catch {
+      // try next query pattern
+    }
+  }
+
+  return [];
+}
+
+async function getRecentWatchedFromPlaybackDb(limit = 12) {
+  if (!JELLYFIN_DB_PATH) {
+    return { ok: false, error: 'JELLYFIN_DB_PATH not configured' };
+  }
+
+  let db;
+  try {
+    db = openJellyfinDatabase();
+    const rows = getRecentPlaybackRows(db, limit);
+    if (!rows.length) {
+      return { ok: false, error: 'No playback rows found in reporting DB' };
+    }
+
+    const recentRows = rows.slice(0, limit * 3);
+    const itemIds = [...new Set(recentRows.map((r) => r.item_id).filter(Boolean))].slice(0, limit * 3);
+    const detailsMap = new Map();
+
+    await Promise.all(itemIds.map(async (itemId) => {
+      const encoded = encodeURIComponent(itemId);
+      const r = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items/${encoded}?Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+      if (r.ok && r.json?.Id) {
+        detailsMap.set(itemId, r.json);
+      }
+    }));
+
+    const items = [];
+    for (const row of recentRows) {
+      if (items.length >= limit) break;
+      const detail = row.item_id ? detailsMap.get(row.item_id) : null;
+      const source = detail || {};
+
+      let title = source.Name || row.item_name || 'Unknown';
+      let grandparent_title = null;
+
+      if (source.Type === 'Episode') {
+        grandparent_title = source.SeriesName || null;
+        if (source.SeasonName && source.IndexNumber) {
+          title = `${source.SeasonName} E${source.IndexNumber} - ${source.Name || title}`;
+        }
+      }
+
+      items.push({
+        title,
+        grandparent_title,
+        year: source.ProductionYear || null,
+        watched_at: row.played_at.getTime(),
+        media_type: source.Type?.toLowerCase() || '',
+        poster: detail ? posterFromJellyfin(source) : null
+      });
+    }
+
+    items.sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
+    return { ok: true, items };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  } finally {
+    if (db) {
+      try { db.close(); } catch {}
+    }
+  }
+}
+
 function buildWeeklyActivityData(events) {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
@@ -278,48 +398,47 @@ apiRouter.get('/recently-watched', async (req, res) => {
   if (!hasJellyfinEnv) return res.json({ items: [], warning: 'jellyfin not configured' });
 
   const limit = Number(req.query.limit || 12);
-  const key = `jellyfin-watched-${limit}`;
+  const key = `jellyfin-watched-v2-${limit}`;
   const hit = getC(key); if (hit) return res.json(hit);
 
-  // Get recently played items from Jellyfin
+  // Prefer playback-reporting DB so watches from all clients/users are included.
+  const dbResult = await getRecentWatchedFromPlaybackDb(limit);
+  if (dbResult.ok && dbResult.items.length) {
+    const payload = { items: dbResult.items, source: 'playback-reporting' };
+    setC(key, payload, 15000);
+    return res.json(payload);
+  }
+
+  // Fallback: user-specific Jellyfin API list.
   const r = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${limit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode`);
   if (!r.ok) return res.json({ items: [], warning: `jellyfin: ${r.error}` });
 
   const list = r.json?.Items || [];
-  const items = [];
-  
-  for (const item of list) {
-    // Only include items that have been played
-    if (!item.UserData?.LastPlayedDate) continue;
-    
-    let title = item.Name || 'Unknown';
-    let grandparent_title = null;
-    
-    // For TV episodes, show series name and episode title
-    if (item.Type === 'Episode') {
-      grandparent_title = item.SeriesName;
-      if (item.SeasonName && item.IndexNumber) {
-        title = `${item.SeasonName} E${item.IndexNumber} - ${item.Name}`;
+  const items = list
+    .filter((item) => item.UserData?.LastPlayedDate)
+    .map((item) => {
+      let title = item.Name || 'Unknown';
+      let grandparent_title = null;
+
+      if (item.Type === 'Episode') {
+        grandparent_title = item.SeriesName;
+        if (item.SeasonName && item.IndexNumber) {
+          title = `${item.SeasonName} E${item.IndexNumber} - ${item.Name}`;
+        }
       }
-    }
-    
-    const watchedAt = item.UserData.LastPlayedDate ? new Date(item.UserData.LastPlayedDate).getTime() : null;
-    const poster = posterFromJellyfin(item);
-    
-    items.push({
-      title,
-      grandparent_title,
-      year: item.ProductionYear || null,
-      watched_at: watchedAt,
-      media_type: item.Type?.toLowerCase() || '',
-      poster
-    });
-  }
 
-  // Sort newest first if timestamps exist
-  items.sort((a,b) => (b.watched_at||0) - (a.watched_at||0));
+      return {
+        title,
+        grandparent_title,
+        year: item.ProductionYear || null,
+        watched_at: new Date(item.UserData.LastPlayedDate).getTime(),
+        media_type: item.Type?.toLowerCase() || '',
+        poster: posterFromJellyfin(item)
+      };
+    })
+    .sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
 
-  const payload = { items };
+  const payload = { items, source: 'jellyfin-user-fallback', warning: dbResult.error };
   setC(key, payload, 15000);
   res.json(payload);
 });

@@ -6,268 +6,529 @@
   <title>Media · fritter.lol</title>
   <link rel="stylesheet" href="/styles.css">
   <style>
-    .muted { opacity:.75; font-size:.9rem }
-    .row { display:flex; gap:12px; align-items:center; justify-content:space-between; }
-    .btn-row { display:flex; gap:10px; flex-wrap:wrap }
-    .grid-2 { display:grid; gap:16px; grid-template-columns: 1fr; }
-    @media (min-width: 900px){ .grid-2 { grid-template-columns: 1fr 1fr; } }
-    .poster-carousel { position:relative; }
-    .poster-grid { display:flex; gap:10px; overflow-x:hidden; scroll-behavior:smooth; width:470px; }
-    .poster-grid .tile { flex:0 0 110px; width:110px; }
-    .tile { position:relative; display:flex; flex-direction:column; }
-    .tile img { width:110px; height:165px; aspect-ratio:2/3; object-fit:cover; border-radius:10px }
-    .tile .t { font-weight:600; font-size:.95rem; }
-    .tile .s { font-size:.85rem; opacity:.8 }
-    .tile .overlay { 
-      position:absolute; 
-      top:0; left:0; right:0; bottom:0; 
-      background:linear-gradient(transparent 60%, rgba(0,0,0,0.8)); 
-      border-radius:10px; 
-      display:flex; 
-      flex-direction:column; 
-      justify-content:flex-end; 
-      padding:8px; 
-      opacity:0; 
-      transition:opacity 0.2s ease;
-      pointer-events:none;
+    :root {
+      --media-bg-a: #f7f9fc;
+      --media-bg-b: #edf4ff;
+      --media-surface: rgba(255, 255, 255, 0.85);
+      --media-border: rgba(15, 23, 42, 0.09);
+      --media-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+      --media-ink: #0f172a;
+      --media-muted: #475569;
+      --media-accent: #0f766e;
+      --media-accent-soft: rgba(15, 118, 110, 0.12);
+      --activity-0: #e2e8f0;
+      --activity-1: #99f6e4;
+      --activity-2: #5eead4;
+      --activity-3: #14b8a6;
+      --activity-4: #0f766e;
     }
-    .tile:hover .overlay { opacity:1; }
-    .tile .overlay .t { color:white; font-weight:600; font-size:.9rem; margin:0; }
-    .tile .overlay .s { color:rgba(255,255,255,0.9); font-size:.8rem; margin:2px 0 0; }
-    .carousel-nav { position:absolute; top:50%; transform:translateY(-50%); background:rgba(0,0,0,0.7); border:none; color:white; width:32px; height:32px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; z-index:10; transition:background-color 0.2s; }
-    .carousel-nav:hover { background:rgba(0,0,0,0.9); }
-    .carousel-nav:disabled { opacity:0.3; cursor:not-allowed; }
-    .carousel-nav.prev { left:8px; }
-    .carousel-nav.next { right:8px; }
-    .chart { width:100%; height:120px; }
-    .pill { display:inline-block; padding:.2rem .5rem; border-radius:999px; border:1px solid rgba(255,255,255,.15); font-size:.8rem }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --media-bg-a: #071324;
+        --media-bg-b: #0f1e2e;
+        --media-surface: rgba(11, 22, 32, 0.85);
+        --media-border: rgba(148, 163, 184, 0.22);
+        --media-shadow: 0 24px 45px rgba(2, 6, 23, 0.4);
+        --media-ink: #e2e8f0;
+        --media-muted: #94a3b8;
+        --media-accent: #2dd4bf;
+        --media-accent-soft: rgba(45, 212, 191, 0.2);
+        --activity-0: #1f2937;
+        --activity-1: #164e63;
+        --activity-2: #0e7490;
+        --activity-3: #0f766e;
+        --activity-4: #14b8a6;
+      }
+    }
+
+    body {
+      background: radial-gradient(circle at 15% 15%, var(--media-bg-b) 0%, var(--media-bg-a) 55%, var(--media-bg-a) 100%);
+      color: var(--media-ink);
+    }
+
+    header {
+      border-bottom: 1px solid var(--media-border);
+      backdrop-filter: blur(6px);
+      background: color-mix(in srgb, var(--media-bg-a) 75%, transparent);
+    }
+
+    .media-main {
+      padding: 24px 16px 48px;
+    }
+
+    .hero {
+      border: 1px solid var(--media-border);
+      background: linear-gradient(145deg, var(--media-surface), color-mix(in srgb, var(--media-accent-soft) 35%, var(--media-surface)));
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: var(--media-shadow);
+      margin-bottom: 18px;
+    }
+
+    .hero-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .hero h2 {
+      margin: 0;
+      font-size: 1.7rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--media-muted);
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .hero .btn {
+      margin-top: 0;
+      background: var(--media-accent);
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.84rem;
+      color: var(--media-muted);
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--media-border);
+      background: color-mix(in srgb, var(--media-surface) 65%, transparent);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--media-accent);
+    }
+
+    .grid-two {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    @media (min-width: 960px) {
+      .grid-two {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .media-card {
+      border: 1px solid var(--media-border);
+      background: var(--media-surface);
+      border-radius: 16px;
+      box-shadow: var(--media-shadow);
+      padding: 14px;
+      backdrop-filter: blur(6px);
+    }
+
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 10px;
+    }
+
+    .card-top h3 {
+      margin: 0;
+      font-size: 1.1rem;
+    }
+
+    .card-top .hint {
+      color: var(--media-muted);
+      font-size: 0.84rem;
+    }
+
+    .poster-carousel {
+      position: relative;
+    }
+
+    .poster-grid {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(130px, 1fr);
+      gap: 10px;
+      overflow-x: auto;
+      scroll-behavior: smooth;
+      scroll-snap-type: x mandatory;
+      padding-bottom: 6px;
+      scrollbar-width: thin;
+    }
+
+    .poster-grid::-webkit-scrollbar {
+      height: 8px;
+    }
+
+    .poster-grid::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--media-accent) 35%, transparent);
+    }
+
+    .tile {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      min-height: 195px;
+      scroll-snap-align: start;
+      border: 1px solid var(--media-border);
+      background: #0f172a;
+      transform: translateZ(0);
+    }
+
+    .tile img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      aspect-ratio: 2 / 3;
+    }
+
+    .tile-overlay {
+      position: absolute;
+      inset: auto 0 0 0;
+      padding: 10px;
+      background: linear-gradient(to top, rgba(2, 6, 23, 0.88) 10%, rgba(2, 6, 23, 0.1) 95%);
+      color: #f8fafc;
+    }
+
+    .tile-title {
+      margin: 0;
+      font-size: 0.84rem;
+      font-weight: 700;
+      line-height: 1.25;
+      text-shadow: 0 2px 8px rgba(2, 6, 23, 0.4);
+    }
+
+    .tile-meta {
+      margin: 3px 0 0;
+      font-size: 0.75rem;
+      opacity: 0.9;
+    }
+
+    .carousel-nav {
+      position: absolute;
+      top: 45%;
+      transform: translateY(-50%);
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      border: 1px solid var(--media-border);
+      background: color-mix(in srgb, var(--media-surface) 76%, transparent);
+      color: var(--media-ink);
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .carousel-nav:hover {
+      background: color-mix(in srgb, var(--media-accent-soft) 45%, var(--media-surface));
+    }
+
+    .carousel-nav:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .carousel-nav.prev { left: 6px; }
+    .carousel-nav.next { right: 6px; }
+
+    .activity-wrap {
+      display: grid;
+      gap: 10px;
+    }
+
+    .weekly-grid {
+      display: grid;
+      grid-template-columns: auto repeat(8, minmax(16px, 1fr));
+      gap: 4px;
+    }
+
+    .monthly-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(16px, 1fr));
+      gap: 4px;
+    }
+
+    .axis-label,
+    .day-label {
+      font-size: 0.72rem;
+      color: var(--media-muted);
+      text-align: center;
+    }
+
+    .day-label {
+      text-align: left;
+      align-self: center;
+      font-weight: 600;
+    }
+
+    .activity-cell {
+      aspect-ratio: 1 / 1;
+      border-radius: 3px;
+      border: 1px solid color-mix(in srgb, var(--media-border) 75%, transparent);
+      background: var(--activity-0);
+      min-width: 16px;
+      min-height: 16px;
+    }
+
+    .activity-1 { background: var(--activity-1); }
+    .activity-2 { background: var(--activity-2); }
+    .activity-3 { background: var(--activity-3); }
+    .activity-4 { background: var(--activity-4); }
+
+    .muted { color: var(--media-muted); }
   </style>
 </head>
 <body>
   <header>
     <div class="wrap">
-      <h1 style="margin:0 0 8px;"><a href="/" class="site-title">fritter.lol</a></h1>
+      <h1 style="margin:0;"><a href="/" class="site-title">fritter.lol</a></h1>
     </div>
   </header>
 
-  <main class="wrap">
-    <section class="card">
-      <div class="row">
-        <h2 style="margin:0">Media Hub</h2>
+  <main class="wrap media-main">
+    <section class="hero">
+      <div class="hero-top">
+        <h2>Media Dashboard</h2>
         <div class="btn-row">
           <a class="btn" href="https://jellyfin.fritter.lol">Open Jellyfin</a>
           <a class="btn" href="https://jellyseerr.fritter.lol">Open Jellyseerr</a>
         </div>
       </div>
-      <p class="muted">A public peek at what’s been watched lately and weekly activity. No private details shown.</p>
+      <p>Recent viewing and activity snapshots from your media stack.</p>
+      <div id="watchSource" class="status" style="margin-top:10px;">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Loading watch source…</span>
+      </div>
     </section>
 
-    <section class="grid-2">
-      <div class="card">
-        <div class="row"><h3 style="margin:0">Recently Watched</h3></div>
+    <section class="grid-two">
+      <article class="media-card">
+        <div class="card-top">
+          <h3>Recently Watched</h3>
+          <span class="hint">All clients</span>
+        </div>
         <div class="poster-carousel">
-          <button class="carousel-nav prev" onclick="scrollCarousel('watched', -1)">‹</button>
+          <button class="carousel-nav prev" onclick="scrollCarousel('watched', -1)" aria-label="Scroll watched left">‹</button>
           <div id="watched" class="poster-grid"></div>
-          <button class="carousel-nav next" onclick="scrollCarousel('watched', 1)">›</button>
+          <button class="carousel-nav next" onclick="scrollCarousel('watched', 1)" aria-label="Scroll watched right">›</button>
         </div>
-      </div>
+      </article>
 
-      <div class="card">
-        <div class="row"><h3 style="margin:0">Recently Added</h3></div>
-        <div class="poster-carousel">
-          <button class="carousel-nav prev" onclick="scrollCarousel('added', -1)">‹</button>
-          <div id="added" class="poster-grid"></div>
-          <button class="carousel-nav next" onclick="scrollCarousel('added', 1)">›</button>
+      <article class="media-card">
+        <div class="card-top">
+          <h3>Recently Added</h3>
+          <span class="hint">Latest library updates</span>
         </div>
-      </div>
+        <div class="poster-carousel">
+          <button class="carousel-nav prev" onclick="scrollCarousel('added', -1)" aria-label="Scroll added left">‹</button>
+          <div id="added" class="poster-grid"></div>
+          <button class="carousel-nav next" onclick="scrollCarousel('added', 1)" aria-label="Scroll added right">›</button>
+        </div>
+      </article>
     </section>
 
-    <section class="grid-2">
-      <div class="card">
-        <div class="row"><h3 style="margin:0">Weekly Activity</h3><span class="muted">Last 7 days</span></div>
-        <div id="weeklyGrid" style="margin-top:12px;"></div>
-      </div>
+    <section class="grid-two">
+      <article class="media-card">
+        <div class="card-top">
+          <h3>Weekly Activity</h3>
+          <span class="hint">Last 7 days</span>
+        </div>
+        <div id="weeklyGrid" class="activity-wrap"></div>
+      </article>
 
-      <div class="card">
-        <div class="row"><h3 style="margin:0">Monthly Activity</h3><span class="muted">Last 30 days</span></div>
-        <div id="monthlyGrid" style="margin-top:12px;"></div>
-      </div>
+      <article class="media-card">
+        <div class="card-top">
+          <h3>Monthly Activity</h3>
+          <span class="hint">Last 30 days</span>
+        </div>
+        <div id="monthlyGrid" class="activity-wrap"></div>
+      </article>
     </section>
   </main>
 
   <script>
-    const $ = s => document.querySelector(s);
+    const $ = (s) => document.querySelector(s);
     const apibase = '/api/media';
     const placeholder = '/placeholder-poster.jpg';
 
-    async function get(p){
-      const r = await fetch(`${apibase}${p}`, { headers: { 'Accept':'application/json' }});
-      if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-      return r.json();
+    async function get(path) {
+      const response = await fetch(`${apibase}${path}`, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      return response.json();
     }
 
-    function tile(item){
-      const title = item.grandparent_title ? `${item.grandparent_title} — ${item.title}` : item.title;
-      const when = item.watched_at ? 
-        new Date(item.watched_at).toLocaleDateString() : 
-        item.added_at ? new Date(item.added_at).toLocaleDateString() : '';
-      const img = item.poster ? item.poster : placeholder;
-      return `<div class="tile">
-        <img src="${img}" alt="${title}">
-        <div class="overlay">
-          <div class="t">${title || 'Unknown'}</div>
-          <div class="s">${when}</div>
-        </div>
-      </div>`;
+    function esc(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
-    
-    // Create GitHub-style activity grid (7x8 for weekly)
+
+    function formatDate(ts) {
+      if (!ts) return '';
+      return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function tile(item) {
+      const parentTitle = item.grandparent_title ? `${item.grandparent_title} — ` : '';
+      const title = `${parentTitle}${item.title || 'Unknown'}`;
+      const when = formatDate(item.watched_at || item.added_at);
+      const image = item.poster || placeholder;
+      return `<article class="tile">
+        <img src="${esc(image)}" alt="${esc(title)}" loading="lazy">
+        <div class="tile-overlay">
+          <p class="tile-title">${esc(title)}</p>
+          <p class="tile-meta">${esc(when)}</p>
+        </div>
+      </article>`;
+    }
+
+    function levelForValue(value, max) {
+      if (!value || value <= 0) return 0;
+      if (max <= 1) return 2;
+      const ratio = value / max;
+      if (ratio >= 0.75) return 4;
+      if (ratio >= 0.5) return 3;
+      if (ratio >= 0.25) return 2;
+      return 1;
+    }
+
     function drawWeeklyGrid(data) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
-      const maxValue = Math.max(1, ...Object.values(data));
-      
-      let html = '<div class="grid-container" style="display:grid; grid-template-columns: auto repeat(8, 1fr); gap:3px;">';
-      
-      // Add time block headers
-      html += '<div></div>'; // Empty corner cell
-      for (let i = 0; i < timeBlocks.length; i++) {
-        html += `<div style="text-align:center; font-size:0.7rem;">${timeBlocks[i]}</div>`;
+      const max = Math.max(1, ...Object.values(data || {}));
+      const html = [];
+
+      html.push('<div class="weekly-grid">');
+      html.push('<div></div>');
+      for (const block of timeBlocks) {
+        html.push(`<div class="axis-label">${block}</div>`);
       }
-      
-      // Add days and cells
-      for (let day = 0; day < days.length; day++) {
-        html += `<div style="font-size:0.8rem; align-self:center;">${days[day]}</div>`;
-        
-        for (let block = 0; block < timeBlocks.length; block++) {
-          const key = `${days[day]}_${timeBlocks[block]}`;
-          const value = data[key] || 0;
-          const intensity = value > 0 ? Math.max(0.2, Math.min(1, value / maxValue)) : 0;
-          
-          html += `<div title="${days[day]} ${timeBlocks[block]}: ${value} plays" 
-                      style="background-color:rgba(59, 130, 246, ${intensity}); 
-                             border-radius:2px; aspect-ratio:1; 
-                             min-width:15px; min-height:15px;"></div>`;
+
+      for (const day of days) {
+        html.push(`<div class="day-label">${day}</div>`);
+        for (const block of timeBlocks) {
+          const key = `${day}_${block}`;
+          const value = Number(data[key] || 0);
+          const level = levelForValue(value, max);
+          html.push(`<div class="activity-cell activity-${level}" title="${day} ${block}: ${value} plays"></div>`);
         }
       }
-      
-      html += '</div>';
-      return html;
+
+      html.push('</div>');
+      return html.join('');
     }
-    
-    // Create GitHub-style monthly grid
+
     function drawMonthlyGrid(data) {
-      const maxValue = Math.max(1, ...Object.values(data));
-      const weeks = 5; // 4-5 weeks in a month
-      const days = 7;
-      
-      let html = '<div class="grid-container" style="display:grid; grid-template-columns: repeat(7, 1fr); gap:3px;">';
-      
-      // Create grid cells for each day
-      for (let week = 0; week < weeks; week++) {
-        for (let day = 0; day < days; day++) {
-          const index = week * days + day;
-          const dayNum = 30 - index; // Count backward from today
-          
-          if (dayNum < 1) continue; // Skip days that would be before the month
-          
-          const key = `day_${dayNum}`;
-          const value = data[key] || 0;
-          const intensity = value > 0 ? Math.max(0.2, Math.min(1, value / maxValue)) : 0;
-          const date = new Date();
-          date.setDate(date.getDate() - (30 - dayNum));
-          const dateStr = date.toLocaleDateString();
-          
-          html += `<div title="${dateStr}: ${value} plays" 
-                      style="background-color:rgba(59, 130, 246, ${intensity}); 
-                             border-radius:2px; aspect-ratio:1;
-                             min-width:15px; min-height:15px;"></div>`;
-        }
+      const max = Math.max(1, ...Object.values(data || {}));
+      const html = [];
+
+      html.push('<div class="monthly-grid">');
+      for (let day = 30; day >= 1; day--) {
+        const key = `day_${day}`;
+        const value = Number(data[key] || 0);
+        const level = levelForValue(value, max);
+        const date = new Date();
+        date.setDate(date.getDate() - (30 - day));
+        html.push(`<div class="activity-cell activity-${level}" title="${date.toLocaleDateString()}: ${value} plays"></div>`);
       }
-      
-      html += '</div>';
-      return html;
+      html.push('</div>');
+      return html.join('');
     }
 
     function scrollCarousel(containerId, direction) {
-      const container = $(`#${containerId}`);
-      const tileWidth = 110; // Fixed tile width
-      const gap = 10; // Gap between tiles
-      const scrollAmount = (tileWidth + gap) * 4; // Scroll by exactly 4 items
-      container.scrollBy({
-        left: direction * scrollAmount,
-        behavior: 'smooth'
-      });
-      
-      // Update button states after scroll
-      setTimeout(() => updateCarouselButtons(containerId), 300);
+      const container = document.getElementById(containerId);
+      const cardWidth = 140;
+      container.scrollBy({ left: direction * cardWidth * 4, behavior: 'smooth' });
+      setTimeout(() => updateCarouselButtons(containerId), 250);
     }
 
     function updateCarouselButtons(containerId) {
-      const container = $(`#${containerId}`);
+      const container = document.getElementById(containerId);
       const carousel = container.parentElement;
-      const prevBtn = carousel.querySelector('.carousel-nav.prev');
-      const nextBtn = carousel.querySelector('.carousel-nav.next');
-      
-      // Check if we can scroll left or right
-      const canScrollLeft = container.scrollLeft > 0;
-      const canScrollRight = container.scrollLeft < (container.scrollWidth - container.offsetWidth);
-      
-      prevBtn.disabled = !canScrollLeft;
-      nextBtn.disabled = !canScrollRight;
+      const prev = carousel.querySelector('.carousel-nav.prev');
+      const next = carousel.querySelector('.carousel-nav.next');
+      const maxScroll = container.scrollWidth - container.clientWidth;
+      prev.disabled = container.scrollLeft <= 1;
+      next.disabled = container.scrollLeft >= maxScroll - 1;
     }
 
-    async function boot(){
-      try{
+    function setWatchSourceBadge(payload) {
+      const label = document.querySelector('#watchSource span:last-child');
+      if (!label) return;
+      if (payload.source === 'playback-reporting') {
+        label.textContent = 'Watch source: playback reporting (all clients)';
+      } else {
+        label.textContent = 'Watch source: Jellyfin user fallback';
+      }
+    }
+
+    async function boot() {
+      try {
         const [watched, added, weeklyActivity, monthlyActivity] = await Promise.all([
-          get('/recently-watched?limit=10'),
-          get('/recently-added?limit=10'),
+          get('/recently-watched?limit=12'),
+          get('/recently-added?limit=12'),
           get('/activity/weekly'),
-          get('/activity/monthly'),
+          get('/activity/monthly')
         ]);
 
-        // Recently watched tiles
         const watchedItems = watched.items || [];
         $('#watched').innerHTML = watchedItems.length
           ? watchedItems.map(tile).join('')
-          : `<div class="muted">No watch history yet. Start something in Jellyfin!</div>`;
+          : '<div class="muted">No watch history yet.</div>';
 
-        // Recently added tiles
         const addedItems = added.items || [];
         $('#added').innerHTML = addedItems.length
           ? addedItems.map(tile).join('')
-          : `<div class="muted">No recently added content.</div>`;
+          : '<div class="muted">No recently added content.</div>';
 
-        // Initialize carousel button states
-        setTimeout(() => {
-          updateCarouselButtons('watched');
-          updateCarouselButtons('added');
-        }, 100);
+        setWatchSourceBadge(watched);
 
-        // Weekly activity grid (7x8)
-        const weeklyData = weeklyActivity.data || {};
         if (weeklyActivity.warning) {
-          $('#weeklyGrid').innerHTML = `<div class="muted">${weeklyActivity.warning}</div>`;
+          $('#weeklyGrid').innerHTML = `<div class="muted">${esc(weeklyActivity.warning)}</div>`;
         } else {
-          $('#weeklyGrid').innerHTML = drawWeeklyGrid(weeklyData);
-        }
-        
-        // Monthly activity grid
-        const monthlyData = monthlyActivity.data || {};
-        if (monthlyActivity.warning) {
-          $('#monthlyGrid').innerHTML = `<div class="muted">${monthlyActivity.warning}</div>`;
-        } else {
-          $('#monthlyGrid').innerHTML = drawMonthlyGrid(monthlyData);
+          $('#weeklyGrid').innerHTML = drawWeeklyGrid(weeklyActivity.data || {});
         }
 
-      } catch(e){
-        console.error(e);
-        $('#watched').innerHTML = `<div class="muted">Failed to load.</div>`;
-        $('#added').innerHTML = `<div class="muted">Failed to load.</div>`;
-        $('#weeklyGrid').innerHTML = `<div class="muted">Failed to load activity data.</div>`;
-        $('#monthlyGrid').innerHTML = `<div class="muted">Failed to load activity data.</div>`;
+        if (monthlyActivity.warning) {
+          $('#monthlyGrid').innerHTML = `<div class="muted">${esc(monthlyActivity.warning)}</div>`;
+        } else {
+          $('#monthlyGrid').innerHTML = drawMonthlyGrid(monthlyActivity.data || {});
+        }
+
+        updateCarouselButtons('watched');
+        updateCarouselButtons('added');
+
+        document.getElementById('watched').addEventListener('scroll', () => updateCarouselButtons('watched'));
+        document.getElementById('added').addEventListener('scroll', () => updateCarouselButtons('added'));
+      } catch (error) {
+        console.error(error);
+        $('#watched').innerHTML = '<div class="muted">Failed to load.</div>';
+        $('#added').innerHTML = '<div class="muted">Failed to load.</div>';
+        $('#weeklyGrid').innerHTML = '<div class="muted">Failed to load weekly activity.</div>';
+        $('#monthlyGrid').innerHTML = '<div class="muted">Failed to load monthly activity.</div>';
       }
     }
+
     boot();
   </script>
 </body>
