@@ -482,11 +482,9 @@
     function setWatchSourceBadge(payload) {
       const label = document.querySelector('#watchSource span:last-child');
       if (!label) return;
-      if (payload.source === 'playback-reporting') {
-        label.textContent = 'Watch source: playback reporting (all clients)';
-      } else {
-        label.textContent = 'Watch source: Jellyfin user fallback';
-      }
+      if (payload.source === 'jellyfin-all-users') return label.textContent = 'Watch source: Jellyfin all-users';
+      if (payload.source === 'playback-reporting') return label.textContent = 'Watch source: playback reporting (all clients)';
+      label.textContent = 'Watch source: Jellyfin single-user fallback';
     }
 
     async function boot() {

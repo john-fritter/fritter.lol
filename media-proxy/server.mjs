@@ -214,56 +214,83 @@ function getPlaybackEvents(db, daysBack = 30) {
 
 function normalizeTimestamp(value) {
   if (!value) return null;
+  const coerceNumericTimestamp = (numValue) => {
+    if (!Number.isFinite(numValue) || numValue <= 0) return null;
+    // .NET ticks (100ns since 0001-01-01)
+    if (numValue > 1000000000000000) {
+      const ms = Math.floor((numValue - 621355968000000000) / 10000);
+      return ms > 0 ? new Date(ms) : null;
+    }
+    // Unix ms
+    if (numValue > 1000000000000) return new Date(numValue);
+    // Unix s
+    if (numValue > 1000000000) return new Date(numValue * 1000);
+    return null;
+  };
+
+  if (typeof value === 'number') {
+    const d = coerceNumericTimestamp(value);
+    return d && Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  if (typeof value === 'string') {
+    const maybeNum = Number(value);
+    if (Number.isFinite(maybeNum)) {
+      const d = coerceNumericTimestamp(maybeNum);
+      if (d && Number.isFinite(d.getTime())) return d;
+    }
+  }
+
   const d = new Date(value);
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
 function getRecentPlaybackRows(db, limit = 12) {
   const fetchLimit = Math.max(limit * 6, 30);
-  const queries = [
-    `SELECT ItemId as item_id, ItemName as item_name, DateCreated as played_at
-     FROM PlaybackReporting_PlaybackActivity
-     WHERE DateCreated IS NOT NULL
-     ORDER BY DateCreated DESC
-     LIMIT ${fetchLimit}`,
-    `SELECT ItemId as item_id, ItemName as item_name, DatePlayed as played_at
-     FROM PlaybackReporting_PlaybackActivity
-     WHERE DatePlayed IS NOT NULL
-     ORDER BY DatePlayed DESC
-     LIMIT ${fetchLimit}`,
-    `SELECT ItemId as item_id, ItemName as item_name, DateCreated as played_at
-     FROM PlaybackActivity
-     WHERE DateCreated IS NOT NULL
-     ORDER BY DateCreated DESC
-     LIMIT ${fetchLimit}`,
-    `SELECT ItemId as item_id, ItemName as item_name, DatePlayed as played_at
-     FROM PlaybackActivity
-     WHERE DatePlayed IS NOT NULL
-     ORDER BY DatePlayed DESC
-     LIMIT ${fetchLimit}`
-  ];
+  const tableCandidates = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE '%Playback%Activity%' OR name LIKE '%playback%activity%') ORDER BY name"
+  ).all().map((r) => r.name);
+  const fallbackTableCandidates = ['PlaybackReporting_PlaybackActivity', 'PlaybackActivity'];
+  const tableNames = [...new Set([...tableCandidates, ...fallbackTableCandidates])];
 
-  for (const query of queries) {
+  for (const tableName of tableNames) {
     try {
-      const rows = db.prepare(query).all();
-      if (!rows || rows.length === 0) continue;
-      const normalized = rows
-        .map((row) => {
-          const playedAt = normalizeTimestamp(row.played_at);
-          if (!playedAt) return null;
-          return {
-            item_id: row.item_id ? String(row.item_id) : null,
-            item_name: row.item_name ? String(row.item_name) : null,
-            played_at: playedAt
-          };
-        })
-        .filter(Boolean);
+      const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map((c) => c.name);
+      if (!cols.length) continue;
 
-      if (normalized.length > 0) {
-        return normalized.slice(0, fetchLimit);
-      }
+      const playedCol = ['DateCreated', 'DatePlayed', 'PlaybackStartDate', 'StartDate', 'Timestamp', 'EventTime']
+        .find((c) => cols.includes(c));
+      if (!playedCol) continue;
+
+      const itemIdCol = ['ItemId', 'ItemID', 'InternalItemId', 'ItemGuid', 'Guid']
+        .find((c) => cols.includes(c));
+      const itemNameCol = ['ItemName', 'Name', 'Title']
+        .find((c) => cols.includes(c));
+
+      const selectItemId = itemIdCol ? `${itemIdCol} as item_id` : `NULL as item_id`;
+      const selectItemName = itemNameCol ? `${itemNameCol} as item_name` : `NULL as item_name`;
+      const query = `SELECT ${selectItemId}, ${selectItemName}, ${playedCol} as played_at
+        FROM ${tableName}
+        WHERE ${playedCol} IS NOT NULL
+        ORDER BY ${playedCol} DESC
+        LIMIT ${fetchLimit}`;
+
+      const rows = db.prepare(query).all();
+      if (!rows || !rows.length) continue;
+
+      const normalized = rows.map((row) => {
+        const playedAt = normalizeTimestamp(row.played_at);
+        if (!playedAt) return null;
+        return {
+          item_id: row.item_id ? String(row.item_id) : null,
+          item_name: row.item_name ? String(row.item_name) : null,
+          played_at: playedAt
+        };
+      }).filter(Boolean);
+
+      if (normalized.length) return normalized.slice(0, fetchLimit);
     } catch {
-      // try next query pattern
+      // continue trying next table
     }
   }
 
@@ -289,10 +316,10 @@ async function getRecentWatchedFromPlaybackDb(limit = 12) {
 
     await Promise.all(itemIds.map(async (itemId) => {
       const encoded = encodeURIComponent(itemId);
-      const r = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items/${encoded}?Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
-      if (r.ok && r.json?.Id) {
-        detailsMap.set(itemId, r.json);
-      }
+      const globalItem = await jellyfinRequest(`/Items/${encoded}?Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+      if (globalItem.ok && globalItem.json?.Id) return detailsMap.set(itemId, globalItem.json);
+      const scopedItem = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items/${encoded}?Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+      if (scopedItem.ok && scopedItem.json?.Id) detailsMap.set(itemId, scopedItem.json);
     }));
 
     const items = [];
@@ -519,11 +546,18 @@ apiRouter.get('/recently-added', async (req, res) => {
   const key = `jellyfin-added-${limit}`;
   const hit = getC(key); if (hit) return res.json(hit);
 
-  // Get recently added items from Jellyfin
-  const r = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items/Latest?Limit=${limit}&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
-  if (!r.ok) return res.json({ items: [], warning: `jellyfin: ${r.error}` });
+  // Prefer global latest items to avoid single-user visibility limitations.
+  let r = await jellyfinRequest(`/Items?SortBy=DateCreated&SortOrder=Descending&Limit=${limit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear,DateCreated&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode`);
+  let list = r.ok ? (r.json?.Items || []) : [];
+  let source = 'jellyfin-global-items';
 
-  const list = r.json || [];
+  if (!r.ok || !list.length) {
+    const fallback = await jellyfinRequest(`/Users/${JELLYFIN_USER_ID}/Items/Latest?Limit=${limit}&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear,DateCreated&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+    if (!fallback.ok) return res.json({ items: [], warning: `jellyfin: ${fallback.error}` });
+    list = fallback.json || [];
+    source = 'jellyfin-user-latest-fallback';
+  }
+
   const items = [];
   
   for (const item of list) {
@@ -559,7 +593,7 @@ apiRouter.get('/recently-added', async (req, res) => {
   // Sort newest first if timestamps exist
   items.sort((a,b) => (b.added_at||0) - (a.added_at||0));
 
-  const payload = { items };
+  const payload = { items, source };
   setC(key, payload, 30000);
   res.json(payload);
 });
