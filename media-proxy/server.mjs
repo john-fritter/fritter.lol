@@ -485,18 +485,38 @@ apiRouter.get('/recently-watched', async (req, res) => {
   const key = `jellyfin-watched-v2-${limit}`;
   const hit = getC(key); if (hit) return res.json(hit);
 
-  // Primary: aggregate recently played items across all users.
+  // Source A: aggregate recently played items across all users.
   const allUsersResult = await getRecentWatchedAllUsers(limit);
-  if (allUsersResult.ok && allUsersResult.items.length) {
-    const payload = { items: allUsersResult.items, source: 'jellyfin-all-users' };
-    setC(key, payload, 15000);
-    return res.json(payload);
+
+  // Source B: playback-reporting DB (captures events some clients may not reflect in LastPlayedDate order).
+  const dbResult = await getRecentWatchedFromPlaybackDb(limit);
+
+  // Merge A + B for better client coverage.
+  const merged = [];
+  const seen = new Set();
+  const combined = [
+    ...(allUsersResult.ok ? allUsersResult.items : []),
+    ...(dbResult.ok ? dbResult.items : [])
+  ].sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
+
+  for (const item of combined) {
+    const keyPartId = item.id || '';
+    const keyPartTitle = item.title || '';
+    const keyPartTime = item.watched_at || 0;
+    const dedupeKey = `${keyPartId}:${keyPartTitle}:${keyPartTime}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    merged.push(item);
+    if (merged.length >= limit) break;
   }
 
-  // Prefer playback-reporting DB so watches from all clients/users are included.
-  const dbResult = await getRecentWatchedFromPlaybackDb(limit);
-  if (dbResult.ok && dbResult.items.length) {
-    const payload = { items: dbResult.items, source: 'playback-reporting' };
+  if (merged.length > 0) {
+    const payload = {
+      items: merged,
+      source: (allUsersResult.ok && dbResult.ok)
+        ? 'jellyfin-all-users+playback-reporting'
+        : (allUsersResult.ok ? 'jellyfin-all-users' : 'playback-reporting')
+    };
     setC(key, payload, 15000);
     return res.json(payload);
   }
