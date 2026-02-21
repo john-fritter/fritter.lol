@@ -99,6 +99,63 @@ async function jellyfinRequest(endpoint, timeout = TIMEOUT_MS) {
   return await safeFetchJson(url, { headers }, timeout);
 }
 
+async function getRecentWatchedAllUsers(limit = 12) {
+  const usersResp = await jellyfinRequest('/Users');
+  if (!usersResp.ok || !Array.isArray(usersResp.json) || usersResp.json.length === 0) {
+    return { ok: false, error: usersResp.error || 'Unable to read Jellyfin users' };
+  }
+
+  const users = usersResp.json.filter((u) => u && u.Id && !u.Policy?.IsDisabled);
+  if (!users.length) return { ok: false, error: 'No enabled Jellyfin users found' };
+
+  const perUserLimit = Math.max(limit * 2, 20);
+  const perUserResults = await Promise.all(users.map(async (user) => {
+    const r = await jellyfinRequest(`/Users/${user.Id}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${perUserLimit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode`);
+    if (!r.ok) return [];
+    const items = Array.isArray(r.json?.Items) ? r.json.Items : [];
+
+    return items
+      .filter((item) => item.UserData?.LastPlayedDate)
+      .map((item) => {
+        let title = item.Name || 'Unknown';
+        let grandparent_title = null;
+
+        if (item.Type === 'Episode') {
+          grandparent_title = item.SeriesName || null;
+          if (item.SeasonName && item.IndexNumber) {
+            title = `${item.SeasonName} E${item.IndexNumber} - ${item.Name}`;
+          }
+        }
+
+        return {
+          id: item.Id || null,
+          user_id: user.Id,
+          title,
+          grandparent_title,
+          year: item.ProductionYear || null,
+          watched_at: new Date(item.UserData.LastPlayedDate).getTime(),
+          media_type: item.Type?.toLowerCase() || '',
+          poster: posterFromJellyfin(item)
+        };
+      });
+  }));
+
+  const merged = perUserResults.flat().filter((item) => Number.isFinite(item.watched_at));
+  if (!merged.length) return { ok: false, error: 'No recently watched items from Jellyfin users' };
+
+  const deduped = [];
+  const seen = new Set();
+  for (const item of merged.sort((a, b) => b.watched_at - a.watched_at)) {
+    const key = `${item.id || item.title}:${item.user_id}:${item.watched_at}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+    if (deduped.length >= limit) break;
+  }
+
+  return { ok: true, items: deduped };
+}
+
 // --- SQLite database functions for Playback Reporting plugin ---
 function openJellyfinDatabase() {
   if (!JELLYFIN_DB_PATH) {
@@ -401,6 +458,14 @@ apiRouter.get('/recently-watched', async (req, res) => {
   const key = `jellyfin-watched-v2-${limit}`;
   const hit = getC(key); if (hit) return res.json(hit);
 
+  // Primary: aggregate recently played items across all users.
+  const allUsersResult = await getRecentWatchedAllUsers(limit);
+  if (allUsersResult.ok && allUsersResult.items.length) {
+    const payload = { items: allUsersResult.items, source: 'jellyfin-all-users' };
+    setC(key, payload, 15000);
+    return res.json(payload);
+  }
+
   // Prefer playback-reporting DB so watches from all clients/users are included.
   const dbResult = await getRecentWatchedFromPlaybackDb(limit);
   if (dbResult.ok && dbResult.items.length) {
@@ -438,7 +503,8 @@ apiRouter.get('/recently-watched', async (req, res) => {
     })
     .sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
 
-  const payload = { items, source: 'jellyfin-user-fallback', warning: dbResult.error };
+  const warning = [allUsersResult.error, dbResult.error].filter(Boolean).join(' | ');
+  const payload = { items, source: 'jellyfin-user-fallback', warning };
   setC(key, payload, 15000);
   res.json(payload);
 });
