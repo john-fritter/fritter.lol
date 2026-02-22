@@ -612,10 +612,79 @@ async function getUnifiedPlaybackEvents(daysBack = 30) {
     deduped.push(event);
   }
 
+  const bySource = (rows) => rows.reduce((acc, row) => {
+    const key = row?.source || 'unknown';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
   return {
     events: deduped.sort((a, b) => (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0)),
-    warning: warnings.length ? warnings.join(' | ') : null
+    warning: warnings.length ? warnings.join(' | ') : null,
+    stats: {
+      combined_count: combined.length,
+      deduped_count: deduped.length,
+      combined_by_source: bySource(combined),
+      deduped_by_source: bySource(deduped)
+    }
   };
+}
+
+function getActivityDateParts(date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: ACTIVITY_TIMEZONE,
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+
+  const read = (type) => parts.find((p) => p.type === type)?.value || '';
+  const year = read('year');
+  const month = read('month');
+  const day = read('day');
+  const hour = Number(read('hour')) % 24;
+  const minute = read('minute');
+  const second = read('second');
+  const weekday = read('weekday');
+
+  return {
+    weekday,
+    hour,
+    local_date: `${year}-${month}-${day}`,
+    local_time: `${String(hour).padStart(2, '0')}:${minute}:${second}`
+  };
+}
+
+function getWeeklyBucketForDate(date) {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
+  const parts = getActivityDateParts(date);
+  if (!days.includes(parts.weekday) || !Number.isFinite(parts.hour)) return null;
+  const block = timeBlocks[Math.floor(parts.hour / 3)];
+  if (!block) return null;
+  return `${parts.weekday}_${block}`;
+}
+
+function buildMonthlyBucketMap() {
+  const map = new Map();
+  const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ACTIVITY_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  for (let i = 1; i <= 30; i++) {
+    const date = new Date(now - ((30 - i) * dayMs));
+    map.set(dateFormatter.format(date), `day_${i}`);
+  }
+  return map;
 }
 
 async function getRecentWatchedFromPlaybackDb(limit = 12, resultLimit = limit) {
@@ -1033,6 +1102,74 @@ apiRouter.get('/activity/monthly', async (req, res) => {
     const payload = { data: emptyData, warning: `Database error: ${error.message}` };
     setC(key, payload, 30000);
     res.json(payload);
+  }
+});
+
+apiRouter.get('/activity/debug/events', async (req, res) => {
+  const maxRows = 1000;
+  const limit = Math.max(1, Math.min(Number(req.query.limit || 250), maxRows));
+  const monthlyBucketMap = buildMonthlyBucketMap();
+  const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ACTIVITY_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+
+  try {
+    const [weekly, monthly] = await Promise.all([
+      getUnifiedPlaybackEvents(7),
+      getUnifiedPlaybackEvents(30)
+    ]);
+
+    const serialize = (event) => {
+      const parts = getActivityDateParts(event.timestamp);
+      return {
+        source: event.source || null,
+        user_id: event.user_id || null,
+        item_id: event.item_id || null,
+        item_name: event.item_name || null,
+        timestamp_ms: event.timestamp.getTime(),
+        timestamp_utc: event.timestamp.toISOString(),
+        local_date: parts.local_date,
+        local_time: parts.local_time,
+        local_weekday: parts.weekday,
+        local_hour_24: parts.hour,
+        weekly_bucket: getWeeklyBucketForDate(event.timestamp),
+        monthly_bucket: monthlyBucketMap.get(dateFormatter.format(event.timestamp)) || null
+      };
+    };
+
+    return res.json({
+      timezone: ACTIVITY_TIMEZONE,
+      generated_at_utc: new Date().toISOString(),
+      limit_applied: limit,
+      weekly: {
+        warning: weekly.warning || null,
+        total_events: weekly.events.length,
+        stats: weekly.stats || null,
+        events: weekly.events
+          .slice()
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+          .slice(0, limit)
+          .map(serialize)
+      },
+      monthly: {
+        warning: monthly.warning || null,
+        total_events: monthly.events.length,
+        stats: monthly.stats || null,
+        events: monthly.events
+          .slice()
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+          .slice(0, limit)
+          .map(serialize)
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message,
+      timezone: ACTIVITY_TIMEZONE
+    });
   }
 });
 
