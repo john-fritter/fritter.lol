@@ -16,11 +16,6 @@
       --media-muted: #475569;
       --media-accent: #0f766e;
       --media-accent-soft: rgba(15, 118, 110, 0.12);
-      --activity-0: #e2e8f0;
-      --activity-1: #99f6e4;
-      --activity-2: #5eead4;
-      --activity-3: #14b8a6;
-      --activity-4: #0f766e;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -34,11 +29,6 @@
         --media-muted: #94a3b8;
         --media-accent: #2dd4bf;
         --media-accent-soft: rgba(45, 212, 191, 0.2);
-        --activity-0: #1f2937;
-        --activity-1: #164e63;
-        --activity-2: #0e7490;
-        --activity-3: #0f766e;
-        --activity-4: #14b8a6;
       }
     }
 
@@ -236,49 +226,33 @@
       }
     }
 
-    .activity-wrap {
+    .summary-grid {
       display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 10px;
     }
 
-    .weekly-grid {
-      display: grid;
-      grid-template-columns: auto repeat(8, minmax(16px, 1fr));
-      gap: 4px;
+    .summary-item {
+      border: 1px solid color-mix(in srgb, var(--media-border) 80%, transparent);
+      border-radius: 12px;
+      padding: 12px;
+      background: color-mix(in srgb, var(--media-accent-soft) 30%, transparent);
     }
 
-    .monthly-grid {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(16px, 1fr));
-      gap: 4px;
-    }
-
-    .axis-label,
-    .day-label {
-      font-size: 0.72rem;
+    .summary-label {
+      font-size: 0.78rem;
       color: var(--media-muted);
-      text-align: center;
+      margin: 0 0 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
 
-    .day-label {
-      text-align: left;
-      align-self: center;
+    .summary-value {
+      margin: 0;
+      font-size: 1.35rem;
       font-weight: 600;
+      line-height: 1.2;
     }
-
-    .activity-cell {
-      aspect-ratio: 1 / 1;
-      border-radius: 3px;
-      border: 1px solid color-mix(in srgb, var(--media-border) 75%, transparent);
-      background: var(--activity-0);
-      min-width: 16px;
-      min-height: 16px;
-    }
-
-    .activity-1 { background: var(--activity-1); }
-    .activity-2 { background: var(--activity-2); }
-    .activity-3 { background: var(--activity-3); }
-    .activity-4 { background: var(--activity-4); }
 
     .muted { color: var(--media-muted); }
   </style>
@@ -331,18 +305,10 @@
     <section class="grid-two">
       <article class="media-card">
         <div class="card-top">
-          <h3>Weekly Activity</h3>
-          <span class="hint">Last 7 days</span>
+          <h3>Viewing Summary</h3>
+          <span class="hint">Last 7 and 30 days</span>
         </div>
-        <div id="weeklyGrid" class="activity-wrap"></div>
-      </article>
-
-      <article class="media-card">
-        <div class="card-top">
-          <h3>Monthly Activity</h3>
-          <span class="hint">Last 30 days</span>
-        </div>
-        <div id="monthlyGrid" class="activity-wrap"></div>
+        <div id="viewingSummary"></div>
       </article>
     </section>
   </main>
@@ -386,57 +352,83 @@
       </article>`;
     }
 
-    function levelForValue(value, max) {
-      if (!value || value <= 0) return 0;
-      if (max <= 1) return 2;
-      const ratio = value / max;
-      if (ratio >= 0.75) return 4;
-      if (ratio >= 0.5) return 3;
-      if (ratio >= 0.25) return 2;
-      return 1;
+    function formatNumber(value) {
+      return Number(value || 0).toLocaleString();
     }
 
-    function drawWeeklyGrid(data) {
+    function drawViewingSummary(weeklyData, monthlyData) {
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
-      const max = Math.max(1, ...Object.values(data || {}));
-      const html = [];
+      const weekly = weeklyData || {};
+      const monthly = monthlyData || {};
 
-      html.push('<div class="weekly-grid">');
-      html.push('<div></div>');
+      let playsThisWeek = 0;
+      let playsThisMonth = 0;
+      const dayTotals = {};
+      const blockTotals = {};
+
+      for (const day of days) {
+        dayTotals[day] = 0;
+      }
+
       for (const block of timeBlocks) {
-        html.push(`<div class="axis-label">${block}</div>`);
+        blockTotals[block] = 0;
       }
 
       for (const day of days) {
-        html.push(`<div class="day-label">${day}</div>`);
         for (const block of timeBlocks) {
           const key = `${day}_${block}`;
-          const value = Number(data[key] || 0);
-          const level = levelForValue(value, max);
-          html.push(`<div class="activity-cell activity-${level}" title="${day} ${block}: ${value} plays"></div>`);
+          const value = Number(weekly[key] || 0);
+          playsThisWeek += value;
+          dayTotals[day] += value;
+          blockTotals[block] += value;
         }
       }
 
-      html.push('</div>');
-      return html.join('');
-    }
-
-    function drawMonthlyGrid(data) {
-      const max = Math.max(1, ...Object.values(data || {}));
-      const html = [];
-
-      html.push('<div class="monthly-grid">');
       for (let day = 30; day >= 1; day--) {
         const key = `day_${day}`;
-        const value = Number(data[key] || 0);
-        const level = levelForValue(value, max);
-        const date = new Date();
-        date.setDate(date.getDate() - (30 - day));
-        html.push(`<div class="activity-cell activity-${level}" title="${date.toLocaleDateString()}: ${value} plays"></div>`);
+        playsThisMonth += Number(monthly[key] || 0);
       }
-      html.push('</div>');
-      return html.join('');
+
+      let mostActiveDay = 'N/A';
+      let mostActiveDayCount = 0;
+      for (const day of days) {
+        if (dayTotals[day] > mostActiveDayCount) {
+          mostActiveDay = day;
+          mostActiveDayCount = dayTotals[day];
+        }
+      }
+
+      let mostActiveBlock = 'N/A';
+      let mostActiveBlockCount = 0;
+      for (const block of timeBlocks) {
+        if (blockTotals[block] > mostActiveBlockCount) {
+          mostActiveBlock = block;
+          mostActiveBlockCount = blockTotals[block];
+        }
+      }
+
+      const dayDisplay = mostActiveDayCount > 0 ? `${mostActiveDay} (${formatNumber(mostActiveDayCount)})` : 'N/A';
+      const blockDisplay = mostActiveBlockCount > 0 ? `${mostActiveBlock} (${formatNumber(mostActiveBlockCount)})` : 'N/A';
+
+      return `<div class="summary-grid">
+        <div class="summary-item">
+          <p class="summary-label">Plays this week</p>
+          <p class="summary-value">${formatNumber(playsThisWeek)}</p>
+        </div>
+        <div class="summary-item">
+          <p class="summary-label">Plays this month</p>
+          <p class="summary-value">${formatNumber(playsThisMonth)}</p>
+        </div>
+        <div class="summary-item">
+          <p class="summary-label">Most active day (past 7 days)</p>
+          <p class="summary-value">${esc(dayDisplay)}</p>
+        </div>
+        <div class="summary-item">
+          <p class="summary-label">Most active hour range (past 7 days)</p>
+          <p class="summary-value">${esc(blockDisplay)}</p>
+        </div>
+      </div>`;
     }
 
     function scrollCarousel(containerId, direction) {
@@ -475,17 +467,9 @@
           ? addedItems.map(tile).join('')
           : '<div class="muted">No recently added content.</div>';
 
-        if (weeklyActivity.warning) {
-          $('#weeklyGrid').innerHTML = `<div class="muted">${esc(weeklyActivity.warning)}</div>`;
-        } else {
-          $('#weeklyGrid').innerHTML = drawWeeklyGrid(weeklyActivity.data || {});
-        }
-
-        if (monthlyActivity.warning) {
-          $('#monthlyGrid').innerHTML = `<div class="muted">${esc(monthlyActivity.warning)}</div>`;
-        } else {
-          $('#monthlyGrid').innerHTML = drawMonthlyGrid(monthlyActivity.data || {});
-        }
+        const warnings = [weeklyActivity.warning, monthlyActivity.warning].filter(Boolean).map(esc);
+        const warningText = warnings.length ? `<div class="muted" style="margin-bottom:10px;">${warnings.join(' | ')}</div>` : '';
+        $('#viewingSummary').innerHTML = `${warningText}${drawViewingSummary(weeklyActivity.data || {}, monthlyActivity.data || {})}`;
 
         updateCarouselButtons('watched');
         updateCarouselButtons('added');
@@ -496,8 +480,7 @@
         console.error(error);
         $('#watched').innerHTML = '<div class="muted">Failed to load.</div>';
         $('#added').innerHTML = '<div class="muted">Failed to load.</div>';
-        $('#weeklyGrid').innerHTML = '<div class="muted">Failed to load weekly activity.</div>';
-        $('#monthlyGrid').innerHTML = '<div class="muted">Failed to load monthly activity.</div>';
+        $('#viewingSummary').innerHTML = '<div class="muted">Failed to load viewing summary.</div>';
       }
     }
 
