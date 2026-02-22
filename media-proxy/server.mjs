@@ -194,6 +194,18 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+  const hydratedItemCache = new Map();
+  async function hydrateItem(item) {
+    if (!item?.Id) return item || null;
+    const key = String(item.Id);
+    if (hydratedItemCache.has(key)) return hydratedItemCache.get(key);
+    const encoded = encodeURIComponent(key);
+    const full = await jellyfinRequest(`/Items/${encoded}?Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+    const result = (full.ok && full.json?.Id) ? full.json : item;
+    hydratedItemCache.set(key, result);
+    return result;
+  }
+
   const findByTitleCache = new Map();
   async function findItemByTitle(title) {
     const key = normalizeKey(title);
@@ -220,8 +232,9 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
       }
     }
     if (!best) best = list[0] || null;
-    findByTitleCache.set(key, best);
-    return best;
+    const hydrated = await hydrateItem(best);
+    findByTitleCache.set(key, hydrated);
+    return hydrated;
   }
 
   const rows = entries
@@ -272,6 +285,13 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
           title = `${detail.SeasonName} E${detail.IndexNumber} - ${detail.Name || row.title}`;
         }
       }
+      let poster = posterFromJellyfin(detail);
+      if (!poster && detail.Id) {
+        // Last-resort image URL when search/hydration doesn't provide tags.
+        const fallbackUrl = `${JELLYFIN_URL}/Items/${detail.Id}/Images/Primary?height=450&quality=96`;
+        poster = `/api/media/img?u=${encodeURIComponent(fallbackUrl)}&auth=jellyfin`;
+      }
+
       items.push({
         id: detail.Id || row.id || null,
         user_id: row.user_id || null,
@@ -280,7 +300,7 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
         year: detail.ProductionYear || null,
         watched_at: row.watched_at,
         media_type: detail.Type?.toLowerCase() || '',
-        poster: posterFromJellyfin(detail)
+        poster
       });
     } else {
       items.push(row);
