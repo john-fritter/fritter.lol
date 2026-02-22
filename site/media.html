@@ -364,15 +364,27 @@
 
       let playsThisWeek = 0;
       let playsThisMonth = 0;
-      const dayTotals = {};
-      const blockTotals = {};
+      const weekdayTotals = {
+        Sunday: 0,
+        Monday: 0,
+        Tuesday: 0,
+        Wednesday: 0,
+        Thursday: 0,
+        Friday: 0,
+        Saturday: 0
+      };
+      const timeOfDayTotals = {
+        Morning: 0,
+        Afternoon: 0,
+        Evening: 0,
+        'Late Night': 0
+      };
 
-      for (const day of days) {
-        dayTotals[day] = 0;
-      }
-
-      for (const block of timeBlocks) {
-        blockTotals[block] = 0;
+      function timeOfDayForBlock(block) {
+        if (block === '06-09' || block === '09-12') return 'Morning';
+        if (block === '12-15' || block === '15-18') return 'Afternoon';
+        if (block === '18-21' || block === '21-24') return 'Evening';
+        return 'Late Night';
       }
 
       for (const day of days) {
@@ -380,36 +392,44 @@
           const key = `${day}_${block}`;
           const value = Number(weekly[key] || 0);
           playsThisWeek += value;
-          dayTotals[day] += value;
-          blockTotals[block] += value;
+          timeOfDayTotals[timeOfDayForBlock(block)] += value;
         }
       }
 
       for (let day = 30; day >= 1; day--) {
         const key = `day_${day}`;
-        playsThisMonth += Number(monthly[key] || 0);
+        const value = Number(monthly[key] || 0);
+        playsThisMonth += value;
+
+        const date = new Date();
+        date.setHours(12, 0, 0, 0);
+        date.setDate(date.getDate() - (30 - day));
+        const weekday = date.toLocaleDateString(undefined, { weekday: 'long' });
+        if (Object.prototype.hasOwnProperty.call(weekdayTotals, weekday)) {
+          weekdayTotals[weekday] += value;
+        }
       }
 
-      let mostActiveDay = 'N/A';
+      let mostActiveWeekday = 'N/A';
       let mostActiveDayCount = 0;
-      for (const day of days) {
-        if (dayTotals[day] > mostActiveDayCount) {
-          mostActiveDay = day;
-          mostActiveDayCount = dayTotals[day];
+      for (const weekday of Object.keys(weekdayTotals)) {
+        if (weekdayTotals[weekday] > mostActiveDayCount) {
+          mostActiveWeekday = weekday;
+          mostActiveDayCount = weekdayTotals[weekday];
         }
       }
 
-      let mostActiveBlock = 'N/A';
-      let mostActiveBlockCount = 0;
-      for (const block of timeBlocks) {
-        if (blockTotals[block] > mostActiveBlockCount) {
-          mostActiveBlock = block;
-          mostActiveBlockCount = blockTotals[block];
+      let mostActiveTimeOfDay = 'N/A';
+      let mostActiveTimeCount = 0;
+      for (const timeOfDay of Object.keys(timeOfDayTotals)) {
+        if (timeOfDayTotals[timeOfDay] > mostActiveTimeCount) {
+          mostActiveTimeOfDay = timeOfDay;
+          mostActiveTimeCount = timeOfDayTotals[timeOfDay];
         }
       }
 
-      const dayDisplay = mostActiveDayCount > 0 ? `${mostActiveDay} (${formatNumber(mostActiveDayCount)})` : 'N/A';
-      const blockDisplay = mostActiveBlockCount > 0 ? `${mostActiveBlock} (${formatNumber(mostActiveBlockCount)})` : 'N/A';
+      const dayDisplay = mostActiveDayCount > 0 ? `${mostActiveWeekday} (${formatNumber(mostActiveDayCount)})` : 'N/A';
+      const timeOfDayDisplay = mostActiveTimeCount > 0 ? mostActiveTimeOfDay : 'N/A';
 
       return `<div class="summary-grid">
         <div class="summary-item">
@@ -421,12 +441,12 @@
           <p class="summary-value">${formatNumber(playsThisMonth)}</p>
         </div>
         <div class="summary-item">
-          <p class="summary-label">Most active day (past 7 days)</p>
+          <p class="summary-label">Most active day (past 30 days)</p>
           <p class="summary-value">${esc(dayDisplay)}</p>
         </div>
         <div class="summary-item">
-          <p class="summary-label">Most active hour range (past 7 days)</p>
-          <p class="summary-value">${esc(blockDisplay)}</p>
+          <p class="summary-label">Most active time of day (past 7 days)</p>
+          <p class="summary-value">${esc(timeOfDayDisplay)}</p>
         </div>
       </div>`;
     }
