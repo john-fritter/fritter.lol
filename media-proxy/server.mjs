@@ -212,26 +212,54 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
     if (!key) return null;
     if (findByTitleCache.has(key)) return findByTitleCache.get(key);
 
-    const q = encodeURIComponent(title);
-    const r = await jellyfinRequest(`/Items?SearchTerm=${q}&Recursive=true&Limit=10&IncludeItemTypes=Movie,Episode&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
-    if (!r.ok) {
-      findByTitleCache.set(key, null);
-      return null;
+    const parts = String(title).split(' - ').map((p) => p.trim()).filter(Boolean);
+    const seriesPart = parts.length >= 2 ? parts[0] : '';
+    const episodePart = parts.length >= 2 ? parts[parts.length - 1] : '';
+    const episodeNoPrefix = episodePart.replace(/^s\d+e\d+\s*[-:]?\s*/i, '').trim();
+
+    const searchCandidates = [
+      title,
+      episodePart,
+      episodeNoPrefix,
+      seriesPart ? `${seriesPart} ${episodeNoPrefix || episodePart}`.trim() : '',
+      seriesPart
+    ].map((v) => String(v || '').trim()).filter(Boolean);
+
+    let best = null;
+    let bestScore = -1;
+
+    for (const candidate of searchCandidates) {
+      const q = encodeURIComponent(candidate);
+      const r = await jellyfinRequest(`/Items?SearchTerm=${q}&Recursive=true&Limit=25&IncludeItemTypes=Movie,Episode,Video&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+      if (!r.ok) continue;
+      const list = Array.isArray(r.json?.Items) ? r.json.Items : [];
+      const nkCandidate = normalizeKey(candidate);
+      const nkTitle = normalizeKey(title);
+      const nkSeries = normalizeKey(seriesPart);
+      const nkEpisode = normalizeKey(episodeNoPrefix || episodePart);
+
+      for (const item of list) {
+        const nkName = normalizeKey(item?.Name || '');
+        const nkSeriesName = normalizeKey(item?.SeriesName || '');
+        let score = 0;
+
+        if (nkName && nkName === nkTitle) score += 120;
+        if (nkName && nkName === nkCandidate) score += 100;
+        if (nkSeries && nkSeriesName && nkSeriesName === nkSeries) score += 45;
+        if (nkEpisode && nkName && nkName === nkEpisode) score += 45;
+        if (nkEpisode && nkName && nkName.includes(nkEpisode)) score += 25;
+        if (nkCandidate && nkName && nkName.includes(nkCandidate)) score += 15;
+        if (item?.Type === 'Episode') score += 5;
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = item;
+        }
+      }
+
+      if (bestScore >= 120) break;
     }
 
-    const list = Array.isArray(r.json?.Items) ? r.json.Items : [];
-    let best = null;
-    for (const item of list) {
-      const candidates = [
-        item?.Name || '',
-        item?.SeriesName ? `${item.SeriesName} - ${item.Name || ''}` : ''
-      ];
-      if (candidates.some((c) => normalizeKey(c) === key)) {
-        best = item;
-        break;
-      }
-    }
-    if (!best) best = list[0] || null;
     const hydrated = await hydrateItem(best);
     findByTitleCache.set(key, hydrated);
     return hydrated;
