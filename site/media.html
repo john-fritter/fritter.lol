@@ -97,25 +97,6 @@
       background: var(--media-accent);
     }
 
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.84rem;
-      color: var(--media-muted);
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--media-border);
-      background: color-mix(in srgb, var(--media-surface) 65%, transparent);
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--media-accent);
-    }
-
     .grid-two {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -319,10 +300,6 @@
         </div>
       </div>
       <p>Recent viewing and activity snapshots from your media stack.</p>
-      <div id="watchSource" class="status" style="margin-top:10px;">
-        <span class="status-dot" aria-hidden="true"></span>
-        <span>Loading watch source…</span>
-      </div>
     </section>
 
     <section class="grid-two">
@@ -479,17 +456,6 @@
       next.disabled = container.scrollLeft >= maxScroll - 1;
     }
 
-    function setWatchSourceBadge(payload) {
-      const label = document.querySelector('#watchSource span:last-child');
-      if (!label) return;
-      const source = String(payload.source || '');
-      if (source.includes('activity-log')) return label.textContent = 'Watch source: all-users + playback DB + activity log';
-      if (source === 'jellyfin-all-users+playback-reporting') return label.textContent = 'Watch source: all-users + playback reporting';
-      if (source === 'jellyfin-all-users' || source === 'all-users') return label.textContent = 'Watch source: Jellyfin all-users';
-      if (source === 'playback-reporting') return label.textContent = 'Watch source: playback reporting (all clients)';
-      label.textContent = 'Watch source: Jellyfin single-user fallback';
-    }
-
     async function boot() {
       try {
         const [watched, added, weeklyActivity, monthlyActivity] = await Promise.all([
@@ -508,8 +474,6 @@
         $('#added').innerHTML = addedItems.length
           ? addedItems.map(tile).join('')
           : '<div class="muted">No recently added content.</div>';
-
-        setWatchSourceBadge(watched);
 
         if (weeklyActivity.warning) {
           $('#weeklyGrid').innerHTML = `<div class="muted">${esc(weeklyActivity.warning)}</div>`;

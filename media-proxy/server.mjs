@@ -31,7 +31,6 @@ const JELLYFIN_DB_PATH = process.env.JELLYFIN_DB_PATH; // Path to jellyfin.db fi
 
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 1500);
 const hasJellyfinEnv = !!(JELLYFIN_URL && JELLYFIN_TOKEN && JELLYFIN_USER_ID);
-const WATCH_PIPELINE_VERSION = 'watch-v5-debug';
 
 // --- tiny cache ---
 const cache = new Map();
@@ -543,11 +542,7 @@ async function getRecentWatchedFromPlaybackDb(limit = 12, resultLimit = limit) {
         year: source.ProductionYear || null,
         watched_at: row.played_at.getTime(),
         media_type: source.Type?.toLowerCase() || '',
-        poster: detail ? posterFromJellyfin(source) : null,
-        db_user_id: row.user_id || null,
-        db_user_name: row.user_name || null,
-        db_client_name: row.client_name || null,
-        db_device_name: row.device_name || null
+        poster: detail ? posterFromJellyfin(source) : null
       });
     }
 
@@ -685,9 +680,8 @@ apiRouter.get('/recently-watched', async (req, res) => {
   if (!hasJellyfinEnv) return res.json({ items: [], warning: 'jellyfin not configured' });
 
   const limit = Number(req.query.limit || 12);
-  const debugMode = String(req.query.debug || '') === '1';
   const key = `jellyfin-watched-v2-${limit}`;
-  const hit = getC(key); if (hit && !debugMode) return res.json(hit);
+  const hit = getC(key); if (hit) return res.json(hit);
 
   // Source A: aggregate recently played items across all users.
   const sourceLimit = Math.max(limit * 4, 48);
@@ -737,32 +731,9 @@ apiRouter.get('/recently-watched', async (req, res) => {
         allUsersResult.ok ? 'all-users' : null,
         dbResult.ok ? 'playback-reporting' : null,
         activityLogResult.ok ? 'activity-log' : null
-      ].filter(Boolean).join('+'),
-      pipeline_version: WATCH_PIPELINE_VERSION
+      ].filter(Boolean).join('+')
     };
-    if (debugMode) {
-      payload.debug = {
-        all_users_ok: allUsersResult.ok,
-        all_users_count: allUsersResult.ok ? allUsersResult.items.length : 0,
-        all_users_error: allUsersResult.ok ? null : allUsersResult.error,
-        db_ok: dbResult.ok,
-        db_count: dbResult.ok ? dbResult.items.length : 0,
-        db_error: dbResult.ok ? null : dbResult.error,
-        activity_ok: activityLogResult.ok,
-        activity_count: activityLogResult.ok ? activityLogResult.items.length : 0,
-        activity_error: activityLogResult.ok ? null : activityLogResult.error,
-        combined_count: combined.length,
-        merged_count: merged.length,
-        merged_sample: merged.slice(0, Math.min(20, merged.length)).map((item) => ({
-          id: item.id || null,
-          title: item.title || null,
-          watched_at: item.watched_at || null,
-          media_type: item.media_type || null
-        }))
-      };
-    } else {
-      setC(key, payload, 15000);
-    }
+    setC(key, payload, 15000);
     return res.json(payload);
   }
 
@@ -797,23 +768,8 @@ apiRouter.get('/recently-watched', async (req, res) => {
 
   const warning = [allUsersResult.error, dbResult.error].filter(Boolean).join(' | ');
   const extraWarning = activityLogResult.error ? `${warning ? `${warning} | ` : ''}${activityLogResult.error}` : warning;
-  const payload = { items, source: 'jellyfin-user-fallback', warning: extraWarning, pipeline_version: WATCH_PIPELINE_VERSION };
-  if (debugMode) {
-    payload.debug = {
-      all_users_ok: allUsersResult.ok,
-      all_users_count: allUsersResult.ok ? allUsersResult.items.length : 0,
-      all_users_error: allUsersResult.ok ? null : allUsersResult.error,
-      db_ok: dbResult.ok,
-      db_count: dbResult.ok ? dbResult.items.length : 0,
-      db_error: dbResult.ok ? null : dbResult.error,
-      activity_ok: activityLogResult.ok,
-      activity_count: activityLogResult.ok ? activityLogResult.items.length : 0,
-      activity_error: activityLogResult.ok ? null : activityLogResult.error,
-      fallback_count: items.length
-    };
-  } else {
-    setC(key, payload, 15000);
-  }
+  const payload = { items, source: 'jellyfin-user-fallback', warning: extraWarning };
+  setC(key, payload, 15000);
   res.json(payload);
 });
 
@@ -991,68 +947,6 @@ apiRouter.get('/debug/jellyfin-info', async (req, res) => {
   } catch (err) {
     return res.json({ error: err.message });
   }
-});
-
-apiRouter.get('/debug/recent-playback-sources', async (req, res) => {
-  const limit = Number(req.query.limit || 50);
-  const out = {
-    pipeline_version: WATCH_PIPELINE_VERSION,
-    limit,
-    users: [],
-    all_users_api_items: [],
-    db_rows: [],
-    db_error: null
-  };
-
-  try {
-    const usersResp = await jellyfinRequest('/Users');
-    if (usersResp.ok && Array.isArray(usersResp.json)) {
-      const users = usersResp.json.filter((u) => u && u.Id).map((u) => ({ id: u.Id, name: u.Name || null }));
-      out.users = users;
-
-      const perUser = await Promise.all(users.map(async (u) => {
-        const r = await jellyfinRequest(`/Users/${u.id}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${Math.max(limit, 20)}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode,Video`);
-        if (!r.ok) return [];
-        const items = Array.isArray(r.json?.Items) ? r.json.Items : [];
-        return items
-          .filter((i) => i.UserData?.LastPlayedDate)
-          .map((i) => ({
-            user_id: u.id,
-            user_name: u.name,
-            item_id: i.Id || null,
-            title: i.Name || null,
-            media_type: i.Type || null,
-            watched_at: new Date(i.UserData.LastPlayedDate).getTime()
-          }));
-      }));
-
-      out.all_users_api_items = perUser.flat().sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0)).slice(0, limit);
-    }
-  } catch (e) {
-    out.users_error = e.message;
-  }
-
-  try {
-    const db = openJellyfinDatabase();
-    const rows = getRecentPlaybackRows(db, Math.max(limit, 20));
-    db.close();
-    out.db_rows = rows
-      .sort((a, b) => (b.played_at?.getTime() || 0) - (a.played_at?.getTime() || 0))
-      .slice(0, limit)
-      .map((r) => ({
-        item_id: r.item_id || null,
-        title: r.item_name || null,
-        watched_at: r.played_at?.getTime() || null,
-        user_id: r.user_id || null,
-        user_name: r.user_name || null,
-        client_name: r.client_name || null,
-        device_name: r.device_name || null
-      }));
-  } catch (e) {
-    out.db_error = e.message;
-  }
-
-  res.json(out);
 });
 
 app.get('/debug-routes', (req, res) => {
