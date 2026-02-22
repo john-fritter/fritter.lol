@@ -28,6 +28,7 @@ const JELLYFIN_URL = process.env.JELLYFIN_URL;       // e.g. http://jellyfin:809
 const JELLYFIN_TOKEN = process.env.JELLYFIN_TOKEN;   // Jellyfin API token
 const JELLYFIN_USER_ID = process.env.JELLYFIN_USER_ID; // Jellyfin user ID
 const JELLYFIN_DB_PATH = process.env.JELLYFIN_DB_PATH; // Path to jellyfin.db file
+const ACTIVITY_TIMEZONE = process.env.ACTIVITY_TIMEZONE || 'America/Los_Angeles';
 
 const TIMEOUT_MS = Number(process.env.TIMEOUT_MS || 1500);
 const hasJellyfinEnv = !!(JELLYFIN_URL && JELLYFIN_TOKEN && JELLYFIN_USER_ID);
@@ -683,6 +684,12 @@ function buildWeeklyActivityData(events) {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
   const data = {};
+  const partsFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: ACTIVITY_TIMEZONE,
+    weekday: 'short',
+    hour: '2-digit',
+    hour12: false
+  });
   
   // Initialize all buckets to 0
   for (const day of days) {
@@ -694,12 +701,11 @@ function buildWeeklyActivityData(events) {
   // Count events in each bucket
   for (const event of events) {
     const date = event.timestamp;
-    const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
-    const hour = date.getHours();
-    
-    // Convert JavaScript day (0=Sunday) to our format (0=Monday)
-    const dayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-    const dayName = days[dayIndex];
+    const parts = partsFormatter.formatToParts(date);
+    const dayName = parts.find((p) => p.type === 'weekday')?.value;
+    const hourStr = parts.find((p) => p.type === 'hour')?.value;
+    const hour = Number(hourStr) % 24;
+    if (!dayName || !days.includes(dayName) || !Number.isFinite(hour)) continue;
     
     // Determine time block
     const blockIndex = Math.floor(hour / 3);
@@ -716,26 +722,27 @@ function buildWeeklyActivityData(events) {
 
 function buildMonthlyActivityData(events) {
   const data = {};
-  const now = new Date();
+  const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ACTIVITY_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const dayMs = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const dayKeyToBucket = new Map();
   
   // Initialize all days to 0 (day_1 = today, day_30 = 30 days ago)
   for (let i = 1; i <= 30; i++) {
     data[`day_${i}`] = 0;
+    const date = new Date(now - ((30 - i) * dayMs));
+    dayKeyToBucket.set(dateFormatter.format(date), `day_${i}`);
   }
   
   // Count events for each day
   for (const event of events) {
-    const eventDate = event.timestamp;
-    const diffTime = now.getTime() - eventDate.getTime();
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    
-    // Only count events from the last 30 days
-    if (diffDays >= 0 && diffDays < 30) {
-      const dayKey = `day_${30 - diffDays}`; // day_30 = 30 days ago, day_1 = today
-      if (data[dayKey] !== undefined) {
-        data[dayKey]++;
-      }
-    }
+    const bucket = dayKeyToBucket.get(dateFormatter.format(event.timestamp));
+    if (bucket && data[bucket] !== undefined) data[bucket]++;
   }
   
   return data;
