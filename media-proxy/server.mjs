@@ -495,6 +495,128 @@ function getRecentPlaybackRows(db, limit = 12) {
   return [];
 }
 
+function getPlaybackEventsFromReportingDb(db, daysBack = 30) {
+  const cutoffMs = Date.now() - (daysBack * 24 * 60 * 60 * 1000);
+  const limit = Math.max(daysBack * 300, 1000);
+  const rows = getRecentPlaybackRows(db, limit);
+  if (!rows.length) return [];
+
+  return rows
+    .filter((row) => row.played_at && row.played_at.getTime() >= cutoffMs)
+    .map((row) => ({
+      timestamp: row.played_at,
+      item_id: row.item_id || null,
+      item_name: row.item_name || null,
+      user_id: row.user_id || null,
+      source: 'playback-reporting'
+    }));
+}
+
+async function getPlaybackEventsFromActivityLog(daysBack = 30) {
+  const cutoffMs = Date.now() - (daysBack * 24 * 60 * 60 * 1000);
+  const fetchLimit = Math.max(daysBack * 250, 1000);
+  const r = await jellyfinRequest(`/System/ActivityLog/Entries?Limit=${fetchLimit}&HasUserId=true`);
+  if (!r.ok) return { ok: false, error: r.error || 'Unable to read Jellyfin activity log', events: [] };
+
+  const entries = Array.isArray(r.json?.Items) ? r.json.Items : [];
+  if (!entries.length) return { ok: false, error: 'No activity log entries found', events: [] };
+
+  const isPlaybackEntry = (entry) => {
+    const hay = `${entry?.Type || ''} ${entry?.Name || ''} ${entry?.ShortOverview || ''} ${entry?.Overview || ''}`.toLowerCase();
+    return hay.includes('playback') || hay.includes('played') || hay.includes('stopped');
+  };
+
+  const normalizeItemName = (entry) => {
+    const base = entry?.ItemName || entry?.Name || entry?.ShortOverview || entry?.Overview || '';
+    return String(base)
+      .replace(/^[^:]{1,64}:\s*/, '')
+      .replace(/^.+?\bhas finished playing\b\s+/i, '')
+      .replace(/^.+?\bhas started playing\b\s+/i, '')
+      .replace(/^.+?\bplayed\b\s+/i, '')
+      .replace(/\s+\bon\b\s+.+$/i, '')
+      .trim() || null;
+  };
+
+  const events = entries
+    .filter(isPlaybackEntry)
+    .map((entry) => {
+      const date = normalizeTimestamp(entry?.Date || entry?.DateCreated || entry?.Timestamp || entry?.Time);
+      if (!date || date.getTime() < cutoffMs) return null;
+      return {
+        timestamp: date,
+        item_id: entry?.ItemId ? String(entry.ItemId) : null,
+        item_name: normalizeItemName(entry),
+        user_id: entry?.UserId ? String(entry.UserId) : null,
+        source: 'activity-log'
+      };
+    })
+    .filter(Boolean);
+
+  if (!events.length) return { ok: false, error: `No playback events in last ${daysBack} days from activity log`, events: [] };
+  return { ok: true, events };
+}
+
+async function getUnifiedPlaybackEvents(daysBack = 30) {
+  const warnings = [];
+  const combined = [];
+
+  if (JELLYFIN_DB_PATH) {
+    let db = null;
+    try {
+      db = openJellyfinDatabase();
+      const dbEvents = getPlaybackEventsFromReportingDb(db, daysBack);
+      if (dbEvents.length) {
+        combined.push(...dbEvents);
+      } else {
+        warnings.push('No playback events found in reporting DB for selected range');
+      }
+    } catch (error) {
+      warnings.push(`Reporting DB error: ${error.message}`);
+    } finally {
+      if (db) {
+        try { db.close(); } catch {}
+      }
+    }
+  } else {
+    warnings.push('JELLYFIN_DB_PATH not configured');
+  }
+
+  if (hasJellyfinEnv) {
+    const logResult = await getPlaybackEventsFromActivityLog(daysBack);
+    if (logResult.ok && logResult.events.length) {
+      combined.push(...logResult.events);
+    } else if (logResult.error) {
+      warnings.push(logResult.error);
+    }
+  } else {
+    warnings.push('Jellyfin API credentials not configured');
+  }
+
+  const normalizedKey = (value) => String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+  const deduped = [];
+  const seen = new Set();
+  for (const event of combined.sort((a, b) => (b.timestamp?.getTime() || 0) - (a.timestamp?.getTime() || 0))) {
+    const ts = event.timestamp?.getTime();
+    if (!Number.isFinite(ts)) continue;
+    const minuteBucket = Math.floor(ts / 60000);
+    const user = normalizedKey(event.user_id) || 'unknown-user';
+    const item = normalizedKey(event.item_id || event.item_name) || 'unknown-item';
+    const key = `${user}|${item}|${minuteBucket}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(event);
+  }
+
+  return {
+    events: deduped.sort((a, b) => (a.timestamp?.getTime() || 0) - (b.timestamp?.getTime() || 0)),
+    warning: warnings.length ? warnings.join(' | ') : null
+  };
+}
+
 async function getRecentWatchedFromPlaybackDb(limit = 12, resultLimit = limit) {
   if (!JELLYFIN_DB_PATH) {
     return { ok: false, error: 'JELLYFIN_DB_PATH not configured' };
@@ -853,18 +975,10 @@ apiRouter.get('/activity/weekly', async (req, res) => {
   }
 
   try {
-    if (!JELLYFIN_DB_PATH) {
-      const payload = { data: emptyData, warning: 'JELLYFIN_DB_PATH not configured' };
-      setC(key, payload, 30000);
-      return res.json(payload);
-    }
+    const { events, warning } = await getUnifiedPlaybackEvents(7);
 
-    const db = openJellyfinDatabase();
-    const events = getPlaybackEvents(db, 7); // Last 7 days for weekly view
-    db.close();
-    
     if (events.length === 0) {
-      const payload = { data: emptyData, warning: 'No playback events found in Jellyfin database' };
+      const payload = { data: emptyData, warning: warning || 'No playback events found in the last 7 days' };
       setC(key, payload, 30000);
       return res.json(payload);
     }
@@ -894,18 +1008,10 @@ apiRouter.get('/activity/monthly', async (req, res) => {
   }
 
   try {
-    if (!JELLYFIN_DB_PATH) {
-      const payload = { data: emptyData, warning: 'JELLYFIN_DB_PATH not configured' };
-      setC(key, payload, 30000);
-      return res.json(payload);
-    }
+    const { events, warning } = await getUnifiedPlaybackEvents(30);
 
-    const db = openJellyfinDatabase();
-    const events = getPlaybackEvents(db, 30); // Last 30 days for monthly view
-    db.close();
-    
     if (events.length === 0) {
-      const payload = { data: emptyData, warning: 'No playback events found in Jellyfin database' };
+      const payload = { data: emptyData, warning: warning || 'No playback events found in the last 30 days' };
       setC(key, payload, 30000);
       return res.json(payload);
     }
