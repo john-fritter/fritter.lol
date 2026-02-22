@@ -182,8 +182,47 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
     if (!candidates.length) return 'Unknown';
     let title = String(candidates[0]);
     title = title.replace(/^[^:]{1,64}:\s*/, ''); // trim leading "user: "
+    title = title.replace(/^.+?\bhas finished playing\b\s+/i, '');
+    title = title.replace(/^.+?\bhas started playing\b\s+/i, '');
+    title = title.replace(/^.+?\bplayed\b\s+/i, '');
+    title = title.replace(/\s+\bon\b\s+.+$/i, '');
     return title.trim() || 'Unknown';
   };
+
+  const normalizeKey = (value) => String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+  const findByTitleCache = new Map();
+  async function findItemByTitle(title) {
+    const key = normalizeKey(title);
+    if (!key) return null;
+    if (findByTitleCache.has(key)) return findByTitleCache.get(key);
+
+    const q = encodeURIComponent(title);
+    const r = await jellyfinRequest(`/Items?SearchTerm=${q}&Recursive=true&Limit=10&IncludeItemTypes=Movie,Episode&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`);
+    if (!r.ok) {
+      findByTitleCache.set(key, null);
+      return null;
+    }
+
+    const list = Array.isArray(r.json?.Items) ? r.json.Items : [];
+    let best = null;
+    for (const item of list) {
+      const candidates = [
+        item?.Name || '',
+        item?.SeriesName ? `${item.SeriesName} - ${item.Name || ''}` : ''
+      ];
+      if (candidates.some((c) => normalizeKey(c) === key)) {
+        best = item;
+        break;
+      }
+    }
+    if (!best) best = list[0] || null;
+    findByTitleCache.set(key, best);
+    return best;
+  }
 
   const rows = entries
     .filter(isPlaybackEntry)
@@ -191,10 +230,11 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
       const watchedAtDate = normalizeTimestamp(entry?.Date || entry?.DateCreated || entry?.Timestamp || entry?.Time);
       if (!watchedAtDate) return null;
       const itemId = entry?.ItemId ? String(entry.ItemId) : null;
+      const cleanedTitle = normalizeTitle(entry);
       return {
         id: itemId,
         user_id: entry?.UserId ? String(entry.UserId) : null,
-        title: normalizeTitle(entry),
+        title: cleanedTitle,
         grandparent_title: null,
         year: null,
         watched_at: watchedAtDate.getTime(),
@@ -219,7 +259,10 @@ async function getRecentWatchedFromActivityLog(limit = 12, resultLimit = limit) 
   const items = [];
   for (const row of rows) {
     if (items.length >= resultLimit) break;
-    const detail = row.id ? detailsMap.get(row.id) : null;
+    let detail = row.id ? detailsMap.get(row.id) : null;
+    if (!detail) {
+      detail = await findItemByTitle(row.title);
+    }
     if (detail) {
       let title = detail.Name || row.title;
       let grandparent_title = null;
