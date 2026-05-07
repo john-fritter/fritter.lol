@@ -1,24 +1,55 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>About / Contact - fritter.lol</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>About · fritter.lol</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header>
-    <div class="wrap">
-      <h1 style="margin:0 0 8px;"><a href="/" class="site-title">fritter.lol</a></h1>
+  <header class="site-header">
+    <div class="shell nav">
+      <a class="brand" href="/"><span class="brand-mark">f</span><span>fritter.lol</span></a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="/media">Media</a>
+        <a href="https://server.fritter.lol/">Server</a>
+        <a href="/frittertopia">Frittertopia</a>
+        <a href="/about">About</a>
+      </nav>
     </div>
   </header>
 
-  <main class="wrap">
+  <main class="shell">
     <section class="hero">
-      <h2>About / Contact</h2>
-      <p class="muted">This is fritter.lol — a personal server project.</p>
-      <p>Contact: <a href="mailto:jefritter@gmail.com">jefritter@gmail.com</a></p>
+      <div class="panel hero-copy">
+        <p class="kicker">About</p>
+        <h1>A personal server in Oregon.</h1>
+        <p class="lede">fritter.lol is John Fritter's home server. It hosts media tools, private dashboards, and small projects that need a stable place to run.</p>
+      </div>
+      <aside class="panel status-panel">
+        <p class="kicker">Contact</p>
+        <h2>Need to reach me?</h2>
+        <p class="muted"><a href="mailto:jefritter@gmail.com">jefritter@gmail.com</a></p>
+      </aside>
+    </section>
+
+    <section class="grid">
+      <article class="card span-6">
+        <h2>What runs here</h2>
+        <div class="list">
+          <div class="list-row"><span>Media tools</span><span class="muted">Jellyfin and request management</span></div>
+          <div class="list-row"><span>Private dashboards</span><span class="muted">health, metrics, service links</span></div>
+          <div class="list-row"><span>Small hosted projects</span><span class="muted">kept when useful</span></div>
+          <div class="list-row"><span>Frittertopia</span><span class="muted">in development</span></div>
+        </div>
+      </article>
+      <article class="card span-6">
+        <h2>Design goal</h2>
+        <p class="muted">The site keeps stable links, clear status, readable dashboards, and few moving parts.</p>
+      </article>
     </section>
   </main>
+
+  <footer class="shell footer">fritter.lol · personal server in Oregon</footer>
 </body>
 </html>

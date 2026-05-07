@@ -1,0 +1,19 @@
+# Ignore root-level runtime/data files by default.
+/*
+
+# Keep repo metadata and deployment config.
+!.gitignore
+!/README.md
+!/docker-compose.yml
+
+# Static site.
+!/site/
+!/site/**
+/site/.cursor/
+
+# Caddy config only; ignore service runtime config under /config.
+!/config/
+/config/*
+!/config/caddy/
+/config/caddy/*
+!/config/caddy/Caddyfile

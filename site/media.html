@@ -1,510 +1,59 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Media · fritter.lol</title>
   <link rel="stylesheet" href="/styles.css">
-  <style>
-    :root {
-      --media-bg-a: #f7f9fc;
-      --media-bg-b: #edf4ff;
-      --media-surface: rgba(255, 255, 255, 0.85);
-      --media-border: rgba(15, 23, 42, 0.09);
-      --media-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
-      --media-ink: #0f172a;
-      --media-muted: #475569;
-      --media-accent: #0f766e;
-      --media-accent-soft: rgba(15, 118, 110, 0.12);
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --media-bg-a: #071324;
-        --media-bg-b: #0f1e2e;
-        --media-surface: rgba(11, 22, 32, 0.85);
-        --media-border: rgba(148, 163, 184, 0.22);
-        --media-shadow: 0 24px 45px rgba(2, 6, 23, 0.4);
-        --media-ink: #e2e8f0;
-        --media-muted: #94a3b8;
-        --media-accent: #2dd4bf;
-        --media-accent-soft: rgba(45, 212, 191, 0.2);
-      }
-    }
-
-    body {
-      background: radial-gradient(circle at 15% 15%, var(--media-bg-b) 0%, var(--media-bg-a) 55%, var(--media-bg-a) 100%);
-      color: var(--media-ink);
-    }
-
-    header {
-      border-bottom: 1px solid var(--media-border);
-      backdrop-filter: blur(6px);
-      background: color-mix(in srgb, var(--media-bg-a) 75%, transparent);
-    }
-
-    .media-main {
-      padding: 24px 16px 48px;
-    }
-
-    .hero {
-      border: 1px solid var(--media-border);
-      background: linear-gradient(145deg, var(--media-surface), color-mix(in srgb, var(--media-accent-soft) 35%, var(--media-surface)));
-      border-radius: 20px;
-      padding: 20px;
-      box-shadow: var(--media-shadow);
-      margin-bottom: 18px;
-    }
-
-    .hero-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 8px;
-    }
-
-    .hero h2 {
-      margin: 0;
-      font-size: 1.7rem;
-      letter-spacing: -0.02em;
-    }
-
-    .hero p {
-      margin: 0;
-      color: var(--media-muted);
-    }
-
-    .btn-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .hero .btn {
-      margin-top: 0;
-      background: var(--media-accent);
-    }
-
-    .grid-two {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-
-    .media-card {
-      border: 1px solid var(--media-border);
-      background: var(--media-surface);
-      border-radius: 16px;
-      box-shadow: var(--media-shadow);
-      padding: 14px;
-      backdrop-filter: blur(6px);
-      min-width: 0;
-    }
-
-    .card-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-      gap: 10px;
-    }
-
-    .card-top h3 {
-      margin: 0;
-      font-size: 1.1rem;
-    }
-
-    .card-top .hint {
-      color: var(--media-muted);
-      font-size: 0.84rem;
-    }
-
-    .poster-carousel {
-      position: relative;
-    }
-
-    .poster-grid {
-      display: flex;
-      gap: 10px;
-      overflow-x: auto;
-      scroll-behavior: smooth;
-      scroll-snap-type: x proximity;
-      padding-bottom: 6px;
-      scrollbar-width: thin;
-      min-width: 0;
-    }
-
-    .poster-grid::-webkit-scrollbar {
-      height: 8px;
-    }
-
-    .poster-grid::-webkit-scrollbar-thumb {
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--media-accent) 35%, transparent);
-    }
-
-    .tile {
-      position: relative;
-      border-radius: 12px;
-      overflow: hidden;
-      min-height: 0;
-      scroll-snap-align: start;
-      border: 1px solid var(--media-border);
-      background: #0f172a;
-      transform: translateZ(0);
-      width: 130px;
-      flex: 0 0 130px;
-    }
-
-    .tile img {
-      width: 100%;
-      height: 195px;
-      object-fit: cover;
-      display: block;
-      aspect-ratio: 2/3;
-    }
-
-    .tile-overlay {
-      position: absolute;
-      inset: auto 0 0 0;
-      padding: 10px;
-      background: linear-gradient(to top, rgba(2, 6, 23, 0.88) 10%, rgba(2, 6, 23, 0.1) 95%);
-      color: #f8fafc;
-    }
-
-    .tile-title {
-      margin: 0;
-      font-size: 0.84rem;
-      font-weight: 700;
-      line-height: 1.25;
-      text-shadow: 0 2px 8px rgba(2, 6, 23, 0.4);
-    }
-
-    .tile-meta {
-      margin: 3px 0 0;
-      font-size: 0.75rem;
-      opacity: 0.9;
-    }
-
-    .carousel-nav {
-      position: absolute;
-      top: 45%;
-      transform: translateY(-50%);
-      width: 32px;
-      height: 32px;
-      border-radius: 999px;
-      border: 1px solid var(--media-border);
-      background: color-mix(in srgb, var(--media-surface) 76%, transparent);
-      color: var(--media-ink);
-      cursor: pointer;
-      z-index: 2;
-    }
-
-    .carousel-nav:hover {
-      background: color-mix(in srgb, var(--media-accent-soft) 45%, var(--media-surface));
-    }
-
-    .carousel-nav:disabled {
-      opacity: 0.35;
-      cursor: not-allowed;
-    }
-
-    .carousel-nav.prev { left: 6px; }
-    .carousel-nav.next { right: 6px; }
-
-    @media (max-width: 700px) {
-      .tile {
-        width: 118px;
-        flex: 0 0 118px;
-      }
-
-      .tile img {
-        height: 177px;
-      }
-    }
-
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 10px;
-    }
-
-    .summary-item {
-      border: 1px solid color-mix(in srgb, var(--media-border) 80%, transparent);
-      border-radius: 12px;
-      padding: 12px;
-      background: color-mix(in srgb, var(--media-accent-soft) 30%, transparent);
-    }
-
-    .summary-label {
-      font-size: 0.78rem;
-      color: var(--media-muted);
-      margin: 0 0 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    .summary-value {
-      margin: 0;
-      font-size: 1.35rem;
-      font-weight: 600;
-      line-height: 1.2;
-    }
-
-    .muted { color: var(--media-muted); }
-  </style>
 </head>
 <body>
-  <header>
-    <div class="wrap">
-      <h1 style="margin:0;"><a href="/" class="site-title">fritter.lol</a></h1>
+  <header class="site-header">
+    <div class="shell nav">
+      <a class="brand" href="/"><span class="brand-mark">f</span><span>fritter.lol</span></a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="/media">Media</a>
+        <a href="https://server.fritter.lol/">Server</a>
+        <a href="/frittertopia">Frittertopia</a>
+        <a href="/about">About</a>
+      </nav>
     </div>
   </header>
 
-  <main class="wrap media-main">
+  <main class="shell">
     <section class="hero">
-      <div class="hero-top">
-        <h2>Media Dashboard</h2>
-        <div class="btn-row">
-          <a class="btn" href="https://jellyfin.fritter.lol">Open Jellyfin</a>
+      <div class="panel hero-copy">
+        <p class="kicker">Media dashboard</p>
+        <h1>Recent watching and new library items.</h1>
+        <p class="lede">A filtered view of the media stack: recent plays, new library items, and basic viewing totals.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="https://jellyfin.fritter.lol">Open Jellyfin</a>
           <a class="btn" href="https://jellyseerr.fritter.lol">Open Jellyseerr</a>
         </div>
       </div>
-      <p>Recent viewing and activity snapshots from your media stack.</p>
+      <aside class="panel status-panel">
+        <p class="kicker">Refresh</p>
+        <h2 id="media-state">Loading…</h2>
+        <p class="muted" id="media-updated">Fetching media data.</p>
+      </aside>
     </section>
 
-    <section class="grid-two">
-      <article class="media-card">
-        <div class="card-top">
-          <h3>Recently Watched</h3>
-          <span class="hint">All clients</span>
-        </div>
-        <div class="poster-carousel">
-          <button class="carousel-nav prev" onclick="scrollCarousel('watched', -1)" aria-label="Scroll watched left">‹</button>
-          <div id="watched" class="poster-grid"></div>
-          <button class="carousel-nav next" onclick="scrollCarousel('watched', 1)" aria-label="Scroll watched right">›</button>
-        </div>
+    <section class="grid">
+      <article class="card span-6">
+        <div class="toolbar"><div><h2>Recently watched</h2><p class="muted">Jellyfin playback history</p></div></div>
+        <div id="watched" class="poster-row"><p class="muted">Loading…</p></div>
       </article>
-
-      <article class="media-card">
-        <div class="card-top">
-          <h3>Recently Added</h3>
-          <span class="hint">Latest library updates</span>
-        </div>
-        <div class="poster-carousel">
-          <button class="carousel-nav prev" onclick="scrollCarousel('added', -1)" aria-label="Scroll added left">‹</button>
-          <div id="added" class="poster-grid"></div>
-          <button class="carousel-nav next" onclick="scrollCarousel('added', 1)" aria-label="Scroll added right">›</button>
-        </div>
+      <article class="card span-6">
+        <div class="toolbar"><div><h2>Recently added</h2><p class="muted">New Jellyfin library items</p></div></div>
+        <div id="added" class="poster-row"><p class="muted">Loading…</p></div>
       </article>
-    </section>
-
-    <section class="grid-two">
-      <article class="media-card">
-        <div class="card-top">
-          <h3>Viewing Summary</h3>
-          <span class="hint">Last 7 and 30 days</span>
-        </div>
-        <div id="viewingSummary"></div>
+      <article class="card span-12">
+        <div class="toolbar"><div><h2>Viewing summary</h2><p class="muted">7-day and 30-day totals</p></div></div>
+        <div id="summary" class="summary-grid"><p class="muted">Loading…</p></div>
       </article>
     </section>
   </main>
 
-  <script>
-    const $ = (s) => document.querySelector(s);
-    const apibase = '/api/media';
-    const placeholder = '/placeholder-poster.jpg';
-
-    async function get(path) {
-      const response = await fetch(`${apibase}${path}`, { headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      return response.json();
-    }
-
-    function esc(value) {
-      return String(value || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
-
-    function formatDate(ts) {
-      if (!ts) return '';
-      return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    }
-
-    function tile(item) {
-      const parentTitle = item.grandparent_title ? `${item.grandparent_title} — ` : '';
-      const title = `${parentTitle}${item.title || 'Unknown'}`;
-      const when = formatDate(item.watched_at || item.added_at);
-      const image = item.poster || placeholder;
-      return `<article class="tile">
-        <img src="${esc(image)}" alt="${esc(title)}" loading="lazy">
-        <div class="tile-overlay">
-          <p class="tile-title">${esc(title)}</p>
-          <p class="tile-meta">${esc(when)}</p>
-        </div>
-      </article>`;
-    }
-
-    function formatNumber(value) {
-      return Number(value || 0).toLocaleString();
-    }
-
-    function drawViewingSummary(weeklyData, monthlyData) {
-      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const timeBlocks = ['00-03', '03-06', '06-09', '09-12', '12-15', '15-18', '18-21', '21-24'];
-      const weekly = weeklyData || {};
-      const monthly = monthlyData || {};
-
-      let playsThisWeek = 0;
-      let playsThisMonth = 0;
-      const weekdayTotals = {
-        Sunday: 0,
-        Monday: 0,
-        Tuesday: 0,
-        Wednesday: 0,
-        Thursday: 0,
-        Friday: 0,
-        Saturday: 0
-      };
-      const timeOfDayTotals = {
-        Morning: 0,
-        Afternoon: 0,
-        Evening: 0,
-        'Late Night': 0
-      };
-
-      function timeOfDayForBlock(block) {
-        if (block === '06-09' || block === '09-12') return 'Morning';
-        if (block === '12-15' || block === '15-18') return 'Afternoon';
-        if (block === '18-21' || block === '21-24') return 'Evening';
-        return 'Late Night';
-      }
-
-      for (const day of days) {
-        for (const block of timeBlocks) {
-          const key = `${day}_${block}`;
-          const value = Number(weekly[key] || 0);
-          playsThisWeek += value;
-          timeOfDayTotals[timeOfDayForBlock(block)] += value;
-        }
-      }
-
-      for (let day = 30; day >= 1; day--) {
-        const key = `day_${day}`;
-        const value = Number(monthly[key] || 0);
-        playsThisMonth += value;
-
-        const date = new Date();
-        date.setHours(12, 0, 0, 0);
-        date.setDate(date.getDate() - (30 - day));
-        const weekday = date.toLocaleDateString(undefined, { weekday: 'long' });
-        if (Object.prototype.hasOwnProperty.call(weekdayTotals, weekday)) {
-          weekdayTotals[weekday] += value;
-        }
-      }
-
-      let mostActiveWeekday = 'N/A';
-      let mostActiveDayCount = 0;
-      for (const weekday of Object.keys(weekdayTotals)) {
-        if (weekdayTotals[weekday] > mostActiveDayCount) {
-          mostActiveWeekday = weekday;
-          mostActiveDayCount = weekdayTotals[weekday];
-        }
-      }
-
-      let mostActiveTimeOfDay = 'N/A';
-      let mostActiveTimeCount = 0;
-      for (const timeOfDay of Object.keys(timeOfDayTotals)) {
-        if (timeOfDayTotals[timeOfDay] > mostActiveTimeCount) {
-          mostActiveTimeOfDay = timeOfDay;
-          mostActiveTimeCount = timeOfDayTotals[timeOfDay];
-        }
-      }
-
-      const dayDisplay = mostActiveDayCount > 0 ? `${mostActiveWeekday} (${formatNumber(mostActiveDayCount)})` : 'N/A';
-      const timeOfDayDisplay = mostActiveTimeCount > 0 ? mostActiveTimeOfDay : 'N/A';
-
-      return `<div class="summary-grid">
-        <div class="summary-item">
-          <p class="summary-label">Plays this week</p>
-          <p class="summary-value">${formatNumber(playsThisWeek)}</p>
-        </div>
-        <div class="summary-item">
-          <p class="summary-label">Plays this month</p>
-          <p class="summary-value">${formatNumber(playsThisMonth)}</p>
-        </div>
-        <div class="summary-item">
-          <p class="summary-label">Most active day (past 30 days)</p>
-          <p class="summary-value">${esc(dayDisplay)}</p>
-        </div>
-        <div class="summary-item">
-          <p class="summary-label">Most active time of day (past 7 days)</p>
-          <p class="summary-value">${esc(timeOfDayDisplay)}</p>
-        </div>
-      </div>`;
-    }
-
-    function scrollCarousel(containerId, direction) {
-      const container = document.getElementById(containerId);
-      const cardWidth = 140;
-      container.scrollBy({ left: direction * cardWidth * 4, behavior: 'smooth' });
-      setTimeout(() => updateCarouselButtons(containerId), 250);
-    }
-
-    function updateCarouselButtons(containerId) {
-      const container = document.getElementById(containerId);
-      const carousel = container.parentElement;
-      const prev = carousel.querySelector('.carousel-nav.prev');
-      const next = carousel.querySelector('.carousel-nav.next');
-      const maxScroll = container.scrollWidth - container.clientWidth;
-      prev.disabled = container.scrollLeft <= 1;
-      next.disabled = container.scrollLeft >= maxScroll - 1;
-    }
-
-    async function boot() {
-      try {
-        const [watched, added, weeklyActivity, monthlyActivity] = await Promise.all([
-          get('/recently-watched?limit=12'),
-          get('/recently-added?limit=12'),
-          get('/activity/weekly'),
-          get('/activity/monthly')
-        ]);
-
-        const watchedItems = watched.items || [];
-        $('#watched').innerHTML = watchedItems.length
-          ? watchedItems.map(tile).join('')
-          : '<div class="muted">No watch history yet.</div>';
-
-        const addedItems = added.items || [];
-        $('#added').innerHTML = addedItems.length
-          ? addedItems.map(tile).join('')
-          : '<div class="muted">No recently added content.</div>';
-
-        const warnings = [weeklyActivity.warning, monthlyActivity.warning].filter(Boolean).map(esc);
-        const warningText = warnings.length ? `<div class="muted" style="margin-bottom:10px;">${warnings.join(' | ')}</div>` : '';
-        $('#viewingSummary').innerHTML = `${warningText}${drawViewingSummary(weeklyActivity.data || {}, monthlyActivity.data || {})}`;
-
-        updateCarouselButtons('watched');
-        updateCarouselButtons('added');
-
-        document.getElementById('watched').addEventListener('scroll', () => updateCarouselButtons('watched'));
-        document.getElementById('added').addEventListener('scroll', () => updateCarouselButtons('added'));
-      } catch (error) {
-        console.error(error);
-        $('#watched').innerHTML = '<div class="muted">Failed to load.</div>';
-        $('#added').innerHTML = '<div class="muted">Failed to load.</div>';
-        $('#viewingSummary').innerHTML = '<div class="muted">Failed to load viewing summary.</div>';
-      }
-    }
-
-    boot();
-  </script>
+  <footer class="shell footer">Media data is summarized from Jellyfin without exposing upstream tokens.</footer>
+  <script src="/assets/js/media.js" defer></script>
 </body>
 </html>

@@ -1,40 +1,72 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>fritter.lol</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta name="description" content="A small personal server for media, dashboards, and projects.">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header>
-    <div class="wrap">
-      <h1 style="margin:0 0 8px;"><a href="/" class="site-title">fritter.lol</a></h1>
+  <header class="site-header">
+    <div class="shell nav">
+      <a class="brand" href="/"><span class="brand-mark">f</span><span>fritter.lol</span></a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="/media">Media</a>
+        <a href="https://server.fritter.lol/">Server</a>
+        <a href="/frittertopia">Frittertopia</a>
+        <a href="/about">About</a>
+      </nav>
     </div>
   </header>
 
-  <main class="wrap">
+  <main class="shell">
     <section class="hero">
-      <p class="muted">Welcome to fritter.lol</p>
+      <div class="panel hero-copy">
+        <p class="kicker">Personal server</p>
+        <h1>A home server for media and small projects.</h1>
+        <p class="lede">fritter.lol runs John&apos;s media stack, private dashboards, and a few projects hosted from the house.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="/media">Open media dashboard</a>
+          <a class="btn" href="https://server.fritter.lol/">Private server tools</a>
+        </div>
+      </div>
+      <aside class="panel status-panel" aria-label="Site overview">
+        <div>
+          <p class="kicker">Status</p>
+          <h2>Server map</h2>
+        </div>
+        <div class="status-list">
+          <div class="status-row"><span>Media dashboard</span><span class="dot good" title="Online"></span></div>
+          <div class="status-row"><span>Server dashboard</span><span class="dot good" title="Private"></span></div>
+          <div class="status-row"><span>Frittertopia page</span><span class="dot warn" title="Planned"></span></div>
+          <div class="status-row"><span>Public site</span><span class="dot good" title="Online"></span></div>
+        </div>
+      </aside>
     </section>
 
-    <section class="grid">
-      <div class="card">
-        <h3>Media</h3>
-        <p class="muted">Movies and Television</p>
-        <a class="btn" href="/media.html">Open Media</a>
-      </div>
-      <div class="card">
-        <h3>Server</h3>
-        <p class="muted">Private server tools</p>
-        <a class="btn" href="/server.html">Open Server</a>
-      </div>
-      <div class="card">
-        <h3>About</h3>
-        <p class="muted">About Me</p>
-        <a class="btn" href="/about.html">Open About</a>
-      </div>
+    <section class="grid" aria-label="Primary sections">
+      <a class="card-link span-4" href="/media">
+        <article class="card">
+          <div class="card-top"><div><h3>Media</h3><p class="muted">Recent Jellyfin activity, new library items, and links to the media tools.</p></div><span class="icon">▶</span></div>
+          <p class="subtle">Uses filtered Jellyfin data from the media server.</p>
+        </article>
+      </a>
+      <a class="card-link span-4" href="https://server.fritter.lol/">
+        <article class="card">
+          <div class="card-top"><div><h3>Server</h3><p class="muted">Host metrics, container checks, and service links.</p></div><span class="icon">⌁</span></div>
+          <p class="subtle">Password protected.</p>
+        </article>
+      </a>
+      <a class="card-link span-4" href="/frittertopia">
+        <article class="card">
+          <div class="card-top"><div><h3>Frittertopia</h3><p class="muted">A browser-playable text world in development.</p></div><span class="icon">▣</span></div>
+          <p class="subtle">The public page will change when the game is ready to open.</p>
+        </article>
+      </a>
     </section>
   </main>
+
+  <footer class="shell footer">fritter.lol · personal infrastructure</footer>
 </body>
 </html>

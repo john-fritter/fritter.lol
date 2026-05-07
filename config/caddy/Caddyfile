@@ -32,10 +32,16 @@ fritter.lol {
   # --- 3) Static site (path INSIDE the Caddy container) ---
   root * /srv/site
   handle {
-    # Handle /media -> /media.html routing
+    # Clean public routes
     @media_page path /media /media/
     rewrite @media_page /media.html
-    
+
+    @about_page path /about /about/
+    rewrite @about_page /about.html
+
+    @frittertopia_page path /frittertopia /frittertopia/
+    rewrite @frittertopia_page /frittertopia.html
+
     try_files {path} /index.html
     file_server
   }
@@ -62,7 +68,7 @@ fritter.lol {
   }
 }
 
-# Dashy
+# Private server dashboard
 server.fritter.lol {
   encode zstd gzip
 
@@ -70,7 +76,23 @@ server.fritter.lol {
     admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
   }
 
-  reverse_proxy dashy:8080
+  # Read-only Prometheus API proxy for the private dashboard.
+  handle_path /metrics/* {
+    reverse_proxy prometheus:9090
+  }
+
+  root * /srv/site
+
+  @server_root path /
+  rewrite @server_root /server.html
+
+  file_server
+
+  header {
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  }
 
   log {
     output file /var/log/caddy/access.log
@@ -175,6 +197,16 @@ prometheus.fritter.lol {
     admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
   }
   reverse_proxy prometheus:9090
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+
+# Frittertopia
+topia.fritter.lol {
+  reverse_proxy frittertopia:3000
+
   log {
     output file /var/log/caddy/access.log
     format json
