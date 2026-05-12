@@ -203,6 +203,53 @@ prometheus.fritter.lol {
   }
 }
 
+# SilverBullet notes wiki
+notes.fritter.lol {
+  encode zstd gzip
+
+  basic_auth * {
+    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
+  }
+
+  reverse_proxy silverbullet:3000
+
+  header {
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  }
+
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+
+# Gizmo Hermes dashboard
+# Dashboard binds only to the Docker bridge gateway on the host; Caddy provides TLS + auth.
+gizmo.fritter.lol {
+  encode zstd gzip
+
+  basic_auth * {
+    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
+  }
+
+  reverse_proxy unix//config/gizmo-dashboard.sock {
+    header_up Host 127.0.0.1:9119
+  }
+
+  header {
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  }
+
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+
 # Frittertopia
 topia.fritter.lol {
   reverse_proxy frittertopia:3000
