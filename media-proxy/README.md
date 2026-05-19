@@ -13,6 +13,7 @@ It is intentionally **not** the Fritterflix app backend. Its job is to know how 
   - Playback Reporting SQLite database
 - Reconcile and deduplicate household watch history.
 - Read recently added Jellyfin library items.
+- Read normalized movie-library pages for Fritterflix without exposing Jellyfin response shapes.
 - Build weekly and monthly playback activity summaries.
 - Cache short-lived endpoint responses in memory.
 
@@ -54,6 +55,7 @@ GET /api/media/health
 GET /api/media/img?u=<url>&auth=jellyfin
 GET /api/media/recently-watched?limit=12
 GET /api/media/recently-added?limit=10
+GET /api/media/library?limit=50&start_index=0&played=all&sort=recently_added
 GET /api/media/activity/weekly
 GET /api/media/activity/monthly
 GET /api/media/activity/debug/events?limit=250
@@ -82,6 +84,7 @@ src/
   services/imageService.mjs
   services/recentlyWatchedService.mjs
   services/recentlyAddedService.mjs
+  services/libraryService.mjs
   services/activityService.mjs
   routes/*.mjs                       # thin Express route modules
   lib/cache.mjs
@@ -135,11 +138,38 @@ Recommended ownership boundary:
 - `media-proxy` owns local media-stack state: Jellyfin library/item metadata, image proxying, watch history, activity aggregation, and possibly future Radarr/Sonarr/Jellyseerr adapter behavior.
 - Fritterflix owns product/user state: users, auth/session, ratings, reviews, viewings, audit log, watchlist, wheel candidates, TMDB enrichment/cache, and MCP tools.
 
-Next likely Fritterflix-facing media-proxy endpoints, after this refactor is accepted:
+Fritterflix-facing media-proxy endpoints:
 
 ```text
 GET /api/media/library
-GET /api/media/items/:id
+GET /api/media/items/:id   # future; not implemented yet
 ```
 
 Those should return normalized data. Fritterflix should not need to understand raw Jellyfin response shapes.
+
+`GET /api/media/library` returns movie-only Jellyfin library rows in this shape:
+
+```json
+{
+  "items": [
+    {
+      "id": "jellyfin-item-id",
+      "title": "Movie Title",
+      "year": 2026,
+      "media_type": "movie",
+      "provider_ids": { "tmdb": "123", "imdb": "tt123" },
+      "poster": "/api/media/img?...",
+      "added_at": 1770000000000,
+      "runtime_minutes": 120,
+      "genres": ["Drama"],
+      "user_data": { "played": false, "play_count": 0, "last_played_at": null, "is_favorite": false }
+    }
+  ],
+  "total": 1,
+  "start_index": 0,
+  "limit": 50,
+  "source": "jellyfin-user-items",
+  "sort": "recently_added",
+  "unwatched_first": true
+}
+```

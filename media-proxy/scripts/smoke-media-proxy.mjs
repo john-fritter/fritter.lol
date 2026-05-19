@@ -5,6 +5,7 @@ const checks = [
   { path: '/api/media/health', keys: ['ok'] },
   { path: '/api/media/recently-watched?limit=1', keys: ['items'] },
   { path: '/api/media/recently-added?limit=1', keys: ['items'] },
+  { path: '/api/media/library?limit=1', keys: ['items', 'total'] },
   { path: '/api/media/activity/weekly', keys: ['data'] },
   { path: '/api/media/activity/monthly', keys: ['data'] }
 ];
