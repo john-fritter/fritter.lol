@@ -23,3 +23,39 @@ for (const check of checks) {
   }
   console.log(`ok ${check.path}`);
 }
+
+// Smoke check: GET /api/media/items/:id
+// 1. Fetch a real item ID from the library, then verify the detail endpoint returns the expected shape.
+// 2. Verify a nonexistent ID returns 404 JSON.
+{
+  const libraryUrl = `${baseUrl}/api/media/library?limit=1`;
+  const libraryRes = await fetch(libraryUrl, { headers: { Accept: 'application/json' } });
+  if (!libraryRes.ok) throw new Error(`/api/media/library: ${libraryRes.status} ${libraryRes.statusText}`);
+  const library = await libraryRes.json();
+
+  if (Array.isArray(library.items) && library.items.length > 0) {
+    const realId = library.items[0].id;
+    const itemUrl = `${baseUrl}/api/media/items/${encodeURIComponent(realId)}`;
+    const itemRes = await fetch(itemUrl, { headers: { Accept: 'application/json' } });
+    if (!itemRes.ok) throw new Error(`/api/media/items/${realId}: ${itemRes.status} ${itemRes.statusText}`);
+    const item = await itemRes.json();
+    for (const key of ['id', 'title', 'year', 'media_type', 'provider_ids', 'poster']) {
+      if (!(key in item)) throw new Error(`/api/media/items/:id: missing key ${key}`);
+    }
+    if (!('tmdb' in item.provider_ids) || !('imdb' in item.provider_ids)) {
+      throw new Error('/api/media/items/:id: provider_ids missing tmdb or imdb');
+    }
+    console.log(`ok /api/media/items/:id (id=${realId})`);
+  } else {
+    console.log('skip /api/media/items/:id (library empty, no real ID to test)');
+  }
+
+  const fakeId = '00000000-0000-0000-0000-000000000000';
+  const notFoundRes = await fetch(`${baseUrl}/api/media/items/${fakeId}`, { headers: { Accept: 'application/json' } });
+  if (notFoundRes.status !== 404) {
+    throw new Error(`/api/media/items/${fakeId}: expected 404, got ${notFoundRes.status}`);
+  }
+  const notFoundData = await notFoundRes.json();
+  if (!('error' in notFoundData)) throw new Error(`/api/media/items/${fakeId}: 404 response missing error key`);
+  console.log('ok /api/media/items/:id (404 for nonexistent id)');
+}

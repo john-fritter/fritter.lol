@@ -34,7 +34,7 @@ function normalizeDateMs(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function normalizeMovie(item, imageService) {
+export function normalizeMovie(item, imageService) {
   const userData = item.UserData || {};
   const addedAt = normalizeDateMs(item.DateCreated);
   const lastPlayedAt = normalizeDateMs(userData.LastPlayedDate);

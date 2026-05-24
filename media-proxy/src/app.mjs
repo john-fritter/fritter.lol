@@ -6,12 +6,14 @@ import { createImageService } from './services/imageService.mjs';
 import { createRecentlyWatchedService } from './services/recentlyWatchedService.mjs';
 import { createRecentlyAddedService } from './services/recentlyAddedService.mjs';
 import { createLibraryService } from './services/libraryService.mjs';
+import { createItemService } from './services/itemService.mjs';
 import { createActivityService } from './services/activityService.mjs';
 import { createHealthRoutes } from './routes/healthRoutes.mjs';
 import { createImageRoutes } from './routes/imageRoutes.mjs';
 import { createRecentlyWatchedRoutes } from './routes/recentlyWatchedRoutes.mjs';
 import { createRecentlyAddedRoutes } from './routes/recentlyAddedRoutes.mjs';
 import { createLibraryRoutes } from './routes/libraryRoutes.mjs';
+import { createItemRoutes } from './routes/itemRoutes.mjs';
 import { createActivityRoutes } from './routes/activityRoutes.mjs';
 import { createDebugRoutes } from './routes/debugRoutes.mjs';
 
@@ -51,6 +53,11 @@ export function createApp(config = defaultConfig) {
     jellyfinClient,
     imageService
   });
+  const itemService = createItemService({
+    config,
+    jellyfinClient,
+    imageService
+  });
   const activityService = createActivityService({
     config,
     jellyfinClient,
@@ -64,6 +71,7 @@ export function createApp(config = defaultConfig) {
   apiRouter.use(createRecentlyWatchedRoutes({ recentlyWatchedService }));
   apiRouter.use(createRecentlyAddedRoutes({ recentlyAddedService }));
   apiRouter.use(createLibraryRoutes({ libraryService }));
+  apiRouter.use(createItemRoutes({ itemService }));
   apiRouter.use(createActivityRoutes({ activityService, config }));
 
   app.get('/', (req, res) => {

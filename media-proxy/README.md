@@ -56,6 +56,7 @@ GET /api/media/img?u=<url>&auth=jellyfin
 GET /api/media/recently-watched?limit=12
 GET /api/media/recently-added?limit=10
 GET /api/media/library?limit=50&start_index=0&played=all&sort=recently_added
+GET /api/media/items/:id
 GET /api/media/activity/weekly
 GET /api/media/activity/monthly
 GET /api/media/activity/debug/events?limit=250
@@ -85,6 +86,7 @@ src/
   services/recentlyWatchedService.mjs
   services/recentlyAddedService.mjs
   services/libraryService.mjs
+  services/itemService.mjs
   services/activityService.mjs
   routes/*.mjs                       # thin Express route modules
   lib/cache.mjs
@@ -142,7 +144,7 @@ Fritterflix-facing media-proxy endpoints:
 
 ```text
 GET /api/media/library
-GET /api/media/items/:id   # future; not implemented yet
+GET /api/media/items/:id
 ```
 
 Those should return normalized data. Fritterflix should not need to understand raw Jellyfin response shapes.
@@ -162,6 +164,9 @@ Those should return normalized data. Fritterflix should not need to understand r
       "added_at": 1770000000000,
       "runtime_minutes": 120,
       "genres": ["Drama"],
+      "official_rating": "PG-13",
+      "community_rating": 8.5,
+      "critic_rating": null,
       "user_data": { "played": false, "play_count": 0, "last_played_at": null, "is_favorite": false }
     }
   ],
@@ -173,3 +178,5 @@ Those should return normalized data. Fritterflix should not need to understand r
   "unwatched_first": true
 }
 ```
+
+`GET /api/media/items/:id` returns a single normalized movie in the same item shape (without the list envelope). Returns `404` JSON `{ "error": "item not found" }` when the ID doesn't exist or isn't a movie.
