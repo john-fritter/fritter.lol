@@ -277,3 +277,43 @@ topia.fritter.lol {
     format json
   }
 }
+
+# SerenePub
+pub.fritter.lol {
+  encode zstd gzip
+
+  basic_auth * {
+    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
+  }
+
+  # Socket.io WebSocket connections to the separate sockets server
+  handle /socket.io* {
+    reverse_proxy serene-pub:3001
+  }
+
+  # Main app
+  reverse_proxy serene-pub:3000
+
+  header {
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  }
+
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+
+# SillyTavern
+tavern.fritter.lol {
+  reverse_proxy sillytavern:8000 {
+    header_up X-Real-IP {remote_host}
+  }
+
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
