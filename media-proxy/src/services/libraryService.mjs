@@ -34,7 +34,7 @@ function normalizeDateMs(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function normalizeMovie(item, imageService) {
+export function normalizeMovie(item, imageService) {
   const userData = item.UserData || {};
   const addedAt = normalizeDateMs(item.DateCreated);
   const lastPlayedAt = normalizeDateMs(userData.LastPlayedDate);
@@ -110,7 +110,7 @@ export function createLibraryService({ config, jellyfinClient, imageService }) {
     if (!jellyfin.configured) return { items: [], total: 0, warning: 'jellyfin not configured' };
 
     const limit = parsePositiveInt(query.limit, 50, { min: 1, max: 200 });
-    const startIndex = parsePositiveInt(query.start_index ?? query.offset, 0, { min: 0, max: 100000 });
+    const startIndex = parsePositiveInt(query.start_index ?? query.startIndex ?? query.offset, 0, { min: 0, max: 100000 });
     const fetchLimit = parsePositiveInt(query.fetch_limit, 2000, { min: limit, max: 5000 });
     const fields = [
       'BasicSyncInfo',
