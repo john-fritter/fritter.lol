@@ -24,14 +24,48 @@ for (const check of checks) {
   console.log(`ok ${check.path}`);
 }
 
+async function fetchJson(path) {
+  const response = await fetch(`${baseUrl}${path}`, { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(`${path}: ${response.status} ${response.statusText}`);
+  return response.json();
+}
+
+// Smoke check: GET /api/media/library pagination and startIndex alias.
+{
+  const firstPage = await fetchJson('/api/media/library?limit=1');
+  if (!Array.isArray(firstPage.items)) throw new Error('/api/media/library?limit=1: items is not an array');
+
+  if (Number(firstPage.total) >= 2 && firstPage.items.length > 0) {
+    const secondPage = await fetchJson('/api/media/library?limit=1&start_index=1');
+    const camelSecondPage = await fetchJson('/api/media/library?limit=1&startIndex=1');
+
+    if (!Array.isArray(secondPage.items) || secondPage.items.length !== 1) {
+      throw new Error('/api/media/library?limit=1&start_index=1: expected one item when total >= 2');
+    }
+    if (!Array.isArray(camelSecondPage.items) || camelSecondPage.items.length !== 1) {
+      throw new Error('/api/media/library?limit=1&startIndex=1: expected one item when total >= 2');
+    }
+
+    const firstId = firstPage.items[0]?.id;
+    const secondId = secondPage.items[0]?.id;
+    const camelSecondId = camelSecondPage.items[0]?.id;
+    if (firstId === secondId) {
+      throw new Error('/api/media/library pagination: first and second page returned the same item');
+    }
+    if (secondId !== camelSecondId) {
+      throw new Error('/api/media/library pagination: startIndex did not match start_index');
+    }
+    console.log('ok /api/media/library pagination (start_index and startIndex)');
+  } else {
+    console.log('skip /api/media/library pagination (fewer than 2 library items)');
+  }
+}
+
 // Smoke check: GET /api/media/items/:id
 // 1. Fetch a real item ID from the library, then verify the detail endpoint returns the expected shape.
 // 2. Verify a nonexistent ID returns 404 JSON.
 {
-  const libraryUrl = `${baseUrl}/api/media/library?limit=1`;
-  const libraryRes = await fetch(libraryUrl, { headers: { Accept: 'application/json' } });
-  if (!libraryRes.ok) throw new Error(`/api/media/library: ${libraryRes.status} ${libraryRes.statusText}`);
-  const library = await libraryRes.json();
+  const library = await fetchJson('/api/media/library?limit=1');
 
   if (Array.isArray(library.items) && library.items.length > 0) {
     const realId = library.items[0].id;

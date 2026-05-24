@@ -64,6 +64,8 @@ GET /api/media/debug/jellyfin-info
 GET /debug-routes
 ```
 
+`GET /api/media/library` accepts `limit`, `start_index`, `startIndex`, and `offset` pagination params. `limit` defaults to `50` and is capped at `200` items per page. `start_index` is the canonical zero-based page offset; `startIndex` and `offset` are accepted as aliases.
+
 The static site dashboard currently consumes:
 
 ```text
