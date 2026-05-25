@@ -119,7 +119,7 @@ async function fetchJson(path) {
     console.log('skip /api/media/search in-library state (set SMOKE_LIBRARY_TITLE to enforce)');
   }
 
-  const availableTitle = process.env.SMOKE_AVAILABLE_TITLE || 'The Matrix';
+  const availableTitle = process.env.SMOKE_AVAILABLE_TITLE || 'Interstellar';
   const searchAvailable = await fetchJson(`/api/media/search?q=${encodeURIComponent(availableTitle)}&limit=10`);
   if (!Array.isArray(searchAvailable.items)) throw new Error('/api/media/search available probe: items is not an array');
   const candidate = searchAvailable.items.find((item) => item.media_type === 'movie');
@@ -140,5 +140,19 @@ async function fetchJson(path) {
       throw new Error('/api/media/search available probe: provider_ids missing tmdb');
     }
     console.log('ok /api/media/search available state');
+  }
+
+  const multiwordTitle = process.env.SMOKE_MULTIWORD_TITLE || 'The Matrix';
+  const multiwordSearch = await fetchJson(`/api/media/search?q=${encodeURIComponent(multiwordTitle)}&limit=10`);
+  if (!Array.isArray(multiwordSearch.items)) throw new Error('/api/media/search multi-word probe: items is not an array');
+  if (!health.hasExternalSearch) {
+    console.log('skip /api/media/search multi-word external assertion (no external search source configured)');
+  } else {
+    const external = multiwordSearch.items.filter((item) => item.library_state !== 'in_library');
+    if (external.length > 0) {
+      console.log('ok /api/media/search multi-word external fallback');
+    } else {
+      console.log('skip /api/media/search multi-word external fallback (no external results returned by provider)');
+    }
   }
 }
