@@ -194,6 +194,41 @@ function isJellyseerrRequestedStatus(status) {
   return numeric === 2 || numeric === 3;
 }
 
+function buildJellyseerrSearchVariants(query) {
+  const normalized = String(query || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return [];
+
+  const variants = [];
+  const seen = new Set();
+  const add = (value) => {
+    const candidate = String(value || '').trim().replace(/\s+/g, ' ');
+    if (!candidate) return;
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    variants.push(candidate);
+  };
+
+  add(normalized);
+
+  const articleStripped = normalized.replace(/^(the|a|an)\s+/i, '').trim();
+  add(articleStripped);
+
+  const words = normalized.split(' ').filter(Boolean);
+  if (words.length > 1) {
+    const significant = words.filter((word) => !/^(the|a|an|of|and|to|in|on|for|at|by|with)$/i.test(word));
+    if (significant.length > 0) {
+      add(significant.join(' '));
+      add(significant[0]);
+      if (significant.length > 1) add(significant[significant.length - 1]);
+    }
+    add(words[0]);
+    add(words[words.length - 1]);
+  }
+
+  return variants;
+}
+
 export function createLibraryService({ config, jellyfinClient, imageService }) {
   const { jellyfin } = config;
 
@@ -257,20 +292,37 @@ export function createLibraryService({ config, jellyfinClient, imageService }) {
     const cacheKey = `jellyseerr-search-results-${query}-${limit}`;
     const hit = getCache(cacheKey);
     if (hit) return { ok: true, results: hit };
-    const params = new URLSearchParams({ query, page: '1', language: 'en' });
     const headers = { Accept: 'application/json', 'X-Api-Key': config.jellyseerr.apiKey };
-    const r = await safeFetchJson(`${config.jellyseerr.url}/api/v1/search?${params}`, { headers }, config.timeoutMs);
-    if (!r.ok) return { ok: false, error: `jellyseerr: ${r.error}`, results: [] };
-    const rows = Array.isArray(r.json?.results) ? r.json.results : [];
+    const variants = buildJellyseerrSearchVariants(query);
+    if (!variants.length) return { ok: false, error: 'missing query parameter: q', results: [] };
+
     const normalized = [];
-    for (const row of rows) {
-      if (row?.mediaType !== 'movie') continue;
-      const item = normalizeJellyseerrSearchMovie(row);
-      if (!item) continue;
-      const library_state = isJellyseerrRequestedStatus(row?.mediaInfo?.status) ? 'requested' : 'available';
-      normalized.push({ ...item, library_state });
+    const seenTmdbIds = new Set();
+    let anySuccess = false;
+    let lastError = null;
+    for (const variant of variants) {
+      const params = new URLSearchParams({ query: variant, page: '1', language: 'en' });
+      const r = await safeFetchJson(`${config.jellyseerr.url}/api/v1/search?${params}`, { headers }, config.timeoutMs);
+      if (!r.ok) {
+        lastError = r.error;
+        continue;
+      }
+      anySuccess = true;
+      const rows = Array.isArray(r.json?.results) ? r.json.results : [];
+      for (const row of rows) {
+        if (row?.mediaType !== 'movie') continue;
+        const item = normalizeJellyseerrSearchMovie(row);
+        const tmdbId = String(item?.provider_ids?.tmdb || '');
+        if (!item || !tmdbId || seenTmdbIds.has(tmdbId)) continue;
+        seenTmdbIds.add(tmdbId);
+        const library_state = isJellyseerrRequestedStatus(row?.mediaInfo?.status) ? 'requested' : 'available';
+        normalized.push({ ...item, library_state });
+        if (normalized.length >= limit) break;
+      }
       if (normalized.length >= limit) break;
     }
+
+    if (!anySuccess) return { ok: false, error: `jellyseerr: ${lastError || 'search failed'}`, results: [] };
     setCache(cacheKey, normalized, 30000);
     return { ok: true, results: normalized };
   }
