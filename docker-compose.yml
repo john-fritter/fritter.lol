@@ -232,6 +232,12 @@ services:
       - JELLYFIN_URL=http://jellyfin:8096
       - JELLYFIN_TOKEN=${JELLYFIN_API_KEY}
       - JELLYFIN_USER_ID=${JELLYFIN_USER_ID}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - TMDB_API_BASE_URL=${TMDB_API_BASE_URL:-https://api.themoviedb.org/3}
+      - JELLYSEERR_URL=${JELLYSEERR_URL:-http://jellyseerr:5055}
+      - JELLYSEERR_API_KEY=${JELLYSEERR_API_KEY}
+      - RADARR_URL=${RADARR_URL:-http://radarr:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY}
       - TIMEOUT_MS=5000
       - JELLYFIN_DB_PATH=/jellyfin-config/data/playback_reporting.db
     volumes:
