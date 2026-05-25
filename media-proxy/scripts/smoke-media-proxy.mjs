@@ -4,6 +4,7 @@ const baseUrl = process.env.MEDIA_PROXY_BASE_URL || 'http://127.0.0.1:8080';
 const checks = [
   { path: '/api/media/health', keys: ['ok', 'hasTmdb', 'hasJellyseerr', 'hasExternalSearch'] },
   { path: '/api/media/recently-watched?limit=1', keys: ['items'] },
+  { path: '/api/media/recently-watched?limit=1&type=movie', keys: ['items'] },
   { path: '/api/media/recently-added?limit=1', keys: ['items'] },
   { path: '/api/media/library?limit=1', keys: ['items', 'total'] },
   { path: '/api/media/activity/weekly', keys: ['data'] },
@@ -22,6 +23,31 @@ for (const check of checks) {
     if (!(key in data)) throw new Error(`${check.path}: missing key ${key}`);
   }
   console.log(`ok ${check.path}`);
+}
+
+// Smoke check: GET /api/media/recently-watched type filter behavior.
+{
+  const defaultRecent = await fetchJson('/api/media/recently-watched?limit=14');
+  if (!Array.isArray(defaultRecent.items)) {
+    throw new Error('/api/media/recently-watched?limit=14: items is not an array');
+  }
+  console.log('ok /api/media/recently-watched default shape');
+
+  const movieRecent = await fetchJson('/api/media/recently-watched?limit=14&type=movie');
+  if (!Array.isArray(movieRecent.items)) {
+    throw new Error('/api/media/recently-watched?limit=14&type=movie: items is not an array');
+  }
+  console.log(`info /api/media/recently-watched counts default=${defaultRecent.items.length} movie=${movieRecent.items.length}`);
+
+  if (defaultRecent.items.length === 0 && movieRecent.items.length === 0) {
+    console.log('skip /api/media/recently-watched type content assertions (no recent items available)');
+  } else {
+    const hasNonMovie = movieRecent.items.some((item) => item?.media_type !== 'movie');
+    if (hasNonMovie) {
+      throw new Error('/api/media/recently-watched?type=movie: found item without media_type=movie');
+    }
+    console.log('ok /api/media/recently-watched?type=movie movie-only filter');
+  }
 }
 
 async function fetchJson(path) {
