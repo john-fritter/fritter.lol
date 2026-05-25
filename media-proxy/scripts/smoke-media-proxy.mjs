@@ -2,7 +2,7 @@ import { fetch } from '../src/lib/http.mjs';
 
 const baseUrl = process.env.MEDIA_PROXY_BASE_URL || 'http://127.0.0.1:8080';
 const checks = [
-  { path: '/api/media/health', keys: ['ok'] },
+  { path: '/api/media/health', keys: ['ok', 'hasTmdb', 'hasJellyseerr', 'hasExternalSearch'] },
   { path: '/api/media/recently-watched?limit=1', keys: ['items'] },
   { path: '/api/media/recently-added?limit=1', keys: ['items'] },
   { path: '/api/media/library?limit=1', keys: ['items', 'total'] },
@@ -92,4 +92,53 @@ async function fetchJson(path) {
   const notFoundData = await notFoundRes.json();
   if (!('error' in notFoundData)) throw new Error(`/api/media/items/${fakeId}: 404 response missing error key`);
   console.log('ok /api/media/items/:id (404 for nonexistent id)');
+}
+
+// Smoke check: GET /api/media/search?q=...
+{
+  const missingQ = await fetch(`${baseUrl}/api/media/search`, { headers: { Accept: 'application/json' } });
+  if (missingQ.status !== 400) {
+    throw new Error(`/api/media/search without q: expected 400, got ${missingQ.status}`);
+  }
+  const missingQBody = await missingQ.json();
+  if (!('error' in missingQBody)) throw new Error('/api/media/search without q: missing error key');
+  console.log('ok /api/media/search (400 for missing q)');
+
+  const health = await fetchJson('/api/media/health');
+  const inLibraryTitle = process.env.SMOKE_LIBRARY_TITLE;
+  if (inLibraryTitle) {
+    const searchLibrary = await fetchJson(`/api/media/search?q=${encodeURIComponent(inLibraryTitle)}&limit=10`);
+    if (!Array.isArray(searchLibrary.items)) throw new Error('/api/media/search in-library probe: items is not an array');
+    const match = searchLibrary.items.find((item) => item.library_state === 'in_library');
+    if (!match) throw new Error('/api/media/search in-library probe: expected at least one in_library result');
+    for (const key of ['id', 'title', 'year', 'media_type', 'provider_ids', 'poster', 'library_state']) {
+      if (!(key in match)) throw new Error(`/api/media/search in-library probe: missing key ${key}`);
+    }
+    console.log('ok /api/media/search in-library state');
+  } else {
+    console.log('skip /api/media/search in-library state (set SMOKE_LIBRARY_TITLE to enforce)');
+  }
+
+  const availableTitle = process.env.SMOKE_AVAILABLE_TITLE || 'The Matrix';
+  const searchAvailable = await fetchJson(`/api/media/search?q=${encodeURIComponent(availableTitle)}&limit=10`);
+  if (!Array.isArray(searchAvailable.items)) throw new Error('/api/media/search available probe: items is not an array');
+  const candidate = searchAvailable.items.find((item) => item.media_type === 'movie');
+  if (candidate) {
+    for (const key of ['id', 'title', 'year', 'media_type', 'provider_ids', 'poster', 'library_state']) {
+      if (!(key in candidate)) throw new Error(`/api/media/search available probe: missing key ${key}`);
+    }
+  }
+
+  if (!health.hasExternalSearch) {
+    console.log('skip /api/media/search available state assertion (no external search source configured)');
+  } else {
+    const available = searchAvailable.items.find((item) => item.library_state === 'available');
+    if (!available) {
+      throw new Error('/api/media/search available probe: expected at least one available result when external search is configured');
+    }
+    if (!('tmdb' in (available.provider_ids || {}))) {
+      throw new Error('/api/media/search available probe: provider_ids missing tmdb');
+    }
+    console.log('ok /api/media/search available state');
+  }
 }

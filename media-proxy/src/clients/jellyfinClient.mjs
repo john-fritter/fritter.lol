@@ -23,7 +23,7 @@ export function createJellyfinClient(config) {
     getItem: (id, fields = 'BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear') =>
       request(`/Items/${encodeURIComponent(id)}?Fields=${fields}&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`),
     searchItems: (query, includeTypes = 'Movie,Episode,Video') =>
-      request(`/Items?SearchTerm=${encodeURIComponent(query)}&Recursive=true&Limit=25&IncludeItemTypes=${includeTypes}&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb`),
+      request(`/Items?SearchTerm=${encodeURIComponent(query)}&Recursive=true&Limit=25&IncludeItemTypes=${includeTypes}&Fields=BasicSyncInfo,CanDelete,CommunityRating,CriticRating,DateCreated,Genres,OfficialRating,ProviderIds,PrimaryImageAspectRatio,ProductionYear,RunTimeTicks&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&EnableUserData=true`),
     getUserItems: (userId, query) => request(`/Users/${encodeURIComponent(userId)}/Items?${query}`),
     getActivityLog: (limit) => request(`/System/ActivityLog/Entries?Limit=${limit}&HasUserId=true`)
   };

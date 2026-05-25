@@ -1,3 +1,8 @@
+import { getCache, setCache } from '../lib/cache.mjs';
+import { safeFetchJson } from '../lib/http.mjs';
+
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+
 function parsePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -20,6 +25,17 @@ function normalizeProviderIds(providerIds = {}) {
     tmdb: tmdb ? String(tmdb) : null,
     imdb: imdb ? String(imdb) : null
   };
+}
+
+function normalizeFlexibleProviderIds(providerIds = {}) {
+  const out = {};
+  for (const [rawKey, value] of Object.entries(providerIds || {})) {
+    if (value === null || value === undefined || value === '') continue;
+    out[String(rawKey).toLowerCase()] = String(value);
+  }
+  if (!('tmdb' in out)) out.tmdb = null;
+  if (!('imdb' in out)) out.imdb = null;
+  return out;
 }
 
 function normalizeRuntimeTicks(ticks) {
@@ -103,8 +119,178 @@ function sortLibrary(items, query) {
   });
 }
 
+function tmdbPoster(path) {
+  if (!path) return null;
+  return `${TMDB_IMAGE_BASE}${path}`;
+}
+
+function normalizeTmdbMovie(item, externalIds = {}) {
+  return {
+    id: `tmdb:${item.id}`,
+    title: item.title || item.original_title || 'Unknown',
+    year: Number.isFinite(Number(item.release_date?.slice?.(0, 4))) ? Number(item.release_date.slice(0, 4)) : null,
+    media_type: 'movie',
+    provider_ids: normalizeFlexibleProviderIds({ tmdb: item.id, imdb: externalIds.imdb_id || null }),
+    poster: tmdbPoster(item.poster_path),
+    added_at: null,
+    runtime_minutes: null,
+    genres: [],
+    official_rating: null,
+    community_rating: Number.isFinite(Number(item.vote_average)) ? Number(item.vote_average) : null,
+    critic_rating: null,
+    user_data: { played: false, play_count: 0, last_played_at: null, is_favorite: false }
+  };
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const str = String(value).trim();
+    if (str) return str;
+  }
+  return null;
+}
+
+function normalizeJellyseerrSearchMovie(row) {
+  const tmdbId = row?.id;
+  if (!tmdbId) return null;
+  const releaseDate = firstNonEmptyString(
+    row?.releaseDate,
+    row?.firstAirDate,
+    row?.mediaInfo?.releaseDate
+  );
+  const year = Number.isFinite(Number(String(releaseDate || '').slice(0, 4)))
+    ? Number(String(releaseDate).slice(0, 4))
+    : null;
+  const imdbId = firstNonEmptyString(row?.imdbId, row?.imdb_id, row?.mediaInfo?.imdbId, row?.mediaInfo?.imdb_id);
+  const posterPath = firstNonEmptyString(row?.posterPath, row?.poster_path);
+
+  return {
+    id: `tmdb:${tmdbId}`,
+    title: row?.title || row?.name || 'Unknown',
+    year,
+    media_type: 'movie',
+    provider_ids: normalizeFlexibleProviderIds({ tmdb: tmdbId, imdb: imdbId || null }),
+    poster: tmdbPoster(posterPath),
+    added_at: null,
+    runtime_minutes: null,
+    genres: [],
+    official_rating: null,
+    community_rating: Number.isFinite(Number(row?.voteAverage)) ? Number(row.voteAverage) : null,
+    critic_rating: null,
+    user_data: { played: false, play_count: 0, last_played_at: null, is_favorite: false }
+  };
+}
+
+function normalizeRadarrRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === 'object') return [payload];
+  return [];
+}
+
+function isJellyseerrRequestedStatus(status) {
+  const numeric = Number(status);
+  if (!Number.isFinite(numeric)) return false;
+  return numeric === 2 || numeric === 3;
+}
+
 export function createLibraryService({ config, jellyfinClient, imageService }) {
   const { jellyfin } = config;
+
+  async function fetchTmdbSearch(query, limit) {
+    if (!config.tmdb?.apiKey) return { ok: false, error: 'tmdb not configured', results: [] };
+    const cacheKey = `tmdb-search-${query}-${limit}`;
+    const hit = getCache(cacheKey);
+    if (hit) return { ok: true, results: hit };
+
+    const params = new URLSearchParams({
+      api_key: config.tmdb.apiKey,
+      query,
+      include_adult: 'false',
+      language: 'en-US',
+      page: '1'
+    });
+    const r = await safeFetchJson(`${config.tmdb.baseUrl}/search/movie?${params}`, { headers: { Accept: 'application/json' } }, config.timeoutMs);
+    if (!r.ok) return { ok: false, error: `tmdb: ${r.error}`, results: [] };
+    const results = Array.isArray(r.json?.results) ? r.json.results.slice(0, limit) : [];
+    setCache(cacheKey, results, 60000);
+    return { ok: true, results };
+  }
+
+  async function fetchTmdbExternalIds(tmdbId) {
+    if (!config.tmdb?.apiKey) return {};
+    const cacheKey = `tmdb-external-ids-${tmdbId}`;
+    const hit = getCache(cacheKey);
+    if (hit) return hit;
+    const params = new URLSearchParams({ api_key: config.tmdb.apiKey });
+    const r = await safeFetchJson(`${config.tmdb.baseUrl}/movie/${encodeURIComponent(String(tmdbId))}/external_ids?${params}`, { headers: { Accept: 'application/json' } }, config.timeoutMs);
+    if (!r.ok) return {};
+    const ids = { imdb_id: r.json?.imdb_id || null };
+    setCache(cacheKey, ids, 300000);
+    return ids;
+  }
+
+  async function fetchJellyseerrRequestedIds(query) {
+    if (!config.jellyseerr?.configured) return new Set();
+    const cacheKey = `jellyseerr-search-${query}`;
+    const hit = getCache(cacheKey);
+    if (hit) return new Set(hit);
+    const params = new URLSearchParams({ query, page: '1', language: 'en' });
+    const headers = { Accept: 'application/json', 'X-Api-Key': config.jellyseerr.apiKey };
+    const r = await safeFetchJson(`${config.jellyseerr.url}/api/v1/search?${params}`, { headers }, config.timeoutMs);
+    if (!r.ok) {
+      console.warn('jellyseerr search failed:', r.error);
+      return new Set();
+    }
+    const ids = new Set();
+    const rows = Array.isArray(r.json?.results) ? r.json.results : [];
+    for (const row of rows) {
+      if (row?.mediaType !== 'movie' || !row?.id) continue;
+      if (isJellyseerrRequestedStatus(row?.mediaInfo?.status)) ids.add(String(row.id));
+    }
+    setCache(cacheKey, Array.from(ids), 30000);
+    return ids;
+  }
+
+  async function fetchJellyseerrSearch(query, limit) {
+    if (!config.jellyseerr?.configured) return { ok: false, error: 'jellyseerr not configured', results: [] };
+    const cacheKey = `jellyseerr-search-results-${query}-${limit}`;
+    const hit = getCache(cacheKey);
+    if (hit) return { ok: true, results: hit };
+    const params = new URLSearchParams({ query, page: '1', language: 'en' });
+    const headers = { Accept: 'application/json', 'X-Api-Key': config.jellyseerr.apiKey };
+    const r = await safeFetchJson(`${config.jellyseerr.url}/api/v1/search?${params}`, { headers }, config.timeoutMs);
+    if (!r.ok) return { ok: false, error: `jellyseerr: ${r.error}`, results: [] };
+    const rows = Array.isArray(r.json?.results) ? r.json.results : [];
+    const normalized = [];
+    for (const row of rows) {
+      if (row?.mediaType !== 'movie') continue;
+      const item = normalizeJellyseerrSearchMovie(row);
+      if (!item) continue;
+      const library_state = isJellyseerrRequestedStatus(row?.mediaInfo?.status) ? 'requested' : 'available';
+      normalized.push({ ...item, library_state });
+      if (normalized.length >= limit) break;
+    }
+    setCache(cacheKey, normalized, 30000);
+    return { ok: true, results: normalized };
+  }
+
+  async function isRequestedViaRadarr(tmdbId) {
+    if (!config.radarr?.configured) return false;
+    const cacheKey = `radarr-requested-${tmdbId}`;
+    const hit = getCache(cacheKey);
+    if (typeof hit === 'boolean') return hit;
+    const headers = { Accept: 'application/json', 'X-Api-Key': config.radarr.apiKey };
+    const r = await safeFetchJson(`${config.radarr.url}/api/v3/movie?tmdbId=${encodeURIComponent(String(tmdbId))}`, { headers }, config.timeoutMs);
+    if (!r.ok) {
+      console.warn('radarr lookup failed:', r.error);
+      return false;
+    }
+    const rows = normalizeRadarrRows(r.json);
+    const requested = rows.some((row) => Number(row?.tmdbId) === Number(tmdbId) && !Boolean(row?.hasFile));
+    setCache(cacheKey, requested, 30000);
+    return requested;
+  }
 
   async function getLibrary(query = {}) {
     if (!jellyfin.configured) return { items: [], total: 0, warning: 'jellyfin not configured' };
@@ -158,5 +344,67 @@ export function createLibraryService({ config, jellyfinClient, imageService }) {
     };
   }
 
-  return { getLibrary };
+  async function search(query = {}) {
+    const q = String(query.q || '').trim();
+    if (!q) return { ok: false, status: 400, error: 'missing query parameter: q' };
+
+    const limit = parsePositiveInt(query.limit, 20, { min: 1, max: 50 });
+    const libraryResp = await jellyfinClient.searchItems(q, 'Movie');
+    const libraryItems = libraryResp.ok
+      ? (Array.isArray(libraryResp.json?.Items) ? libraryResp.json.Items : []).map((item) => ({
+          ...normalizeMovie(item, imageService),
+          library_state: 'in_library'
+        }))
+      : [];
+
+    const seenLibraryIds = new Set();
+    const dedupedLibraryItems = libraryItems.filter((item) => {
+      const id = String(item.id || '');
+      if (!id || seenLibraryIds.has(id)) return false;
+      seenLibraryIds.add(id);
+      return true;
+    });
+    const libraryByTmdb = new Map();
+    for (const item of dedupedLibraryItems) {
+      if (item.provider_ids?.tmdb) libraryByTmdb.set(String(item.provider_ids.tmdb), item);
+    }
+
+    const usingTmdb = Boolean(config.tmdb?.configured);
+    const externalSearch = usingTmdb
+      ? await fetchTmdbSearch(q, limit)
+      : await fetchJellyseerrSearch(q, limit);
+
+    if (!externalSearch.ok && !dedupedLibraryItems.length) {
+      return { items: [], total: 0, warning: externalSearch.error || 'search unavailable' };
+    }
+
+    const externalItems = [];
+    if (usingTmdb) {
+      const requestedIds = await fetchJellyseerrRequestedIds(q);
+      for (const tmdbItem of externalSearch.results || []) {
+        const tmdbId = String(tmdbItem.id);
+        if (libraryByTmdb.has(tmdbId)) continue;
+        const externalIds = await fetchTmdbExternalIds(tmdbId);
+        const normalized = normalizeTmdbMovie(tmdbItem, externalIds);
+        let library_state = 'available';
+        if (requestedIds.has(tmdbId)) library_state = 'requested';
+        else if (await isRequestedViaRadarr(tmdbId)) library_state = 'requested';
+        externalItems.push({ ...normalized, library_state });
+      }
+    } else {
+      for (const item of externalSearch.results || []) {
+        const tmdbId = String(item?.provider_ids?.tmdb || '');
+        if (!tmdbId || libraryByTmdb.has(tmdbId)) continue;
+        externalItems.push(item);
+      }
+    }
+
+    const source = usingTmdb ? 'jellyfin+tmdb' : 'jellyfin+jellyseerr';
+    const items = [...dedupedLibraryItems, ...externalItems].slice(0, limit);
+    const payload = { items, total: items.length, query: q, limit, source };
+    if (!externalSearch.ok) payload.warning = externalSearch.error || 'external search unavailable';
+    return payload;
+  }
+
+  return { getLibrary, search };
 }
