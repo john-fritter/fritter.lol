@@ -306,12 +306,14 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
 
   async function getRecentlyWatched(limit = 12, options = {}) {
     const filteredType = String(options?.type || '').trim().toLowerCase();
-    if (!jellyfin.configured) return { items: [], warning: 'jellyfin not configured' };
+    const startIndex = Math.max(0, Math.floor(Number(options?.startIndex) || 0));
+    if (!jellyfin.configured) return { items: [], start_index: startIndex, limit, warning: 'jellyfin not configured' };
 
-    const sourceLimit = Math.max(limit * 4, 48);
-    const allUsersResult = await getRecentWatchedAllUsers(limit, sourceLimit);
-    const dbResult = await getRecentWatchedFromPlaybackDb(limit, sourceLimit);
-    const activityLogResult = await getRecentWatchedFromActivityLog(limit, sourceLimit);
+    const neededItems = startIndex + limit;
+    const sourceLimit = Math.max(neededItems * 4, 48);
+    const allUsersResult = await getRecentWatchedAllUsers(neededItems, sourceLimit);
+    const dbResult = await getRecentWatchedFromPlaybackDb(neededItems, sourceLimit);
+    const activityLogResult = await getRecentWatchedFromActivityLog(neededItems, sourceLimit);
 
     const merged = [];
     const recentByMediaKey = new Map();
@@ -337,13 +339,15 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
       recentByMediaKey.set(titleKey, ts);
 
       merged.push(item);
-      if (!filteredType && merged.length >= limit) break;
+      if (!filteredType && merged.length >= neededItems) break;
     }
 
     if (merged.length > 0) {
-      const filteredItems = applyTypeFilter(merged, filteredType).slice(0, limit);
+      const filteredItems = applyTypeFilter(merged, filteredType).slice(startIndex, startIndex + limit);
       return {
         items: filteredItems,
+        start_index: startIndex,
+        limit,
         source: [
           allUsersResult.ok ? 'all-users' : null,
           dbResult.ok ? 'playback-reporting' : null,
@@ -352,10 +356,10 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
       };
     }
 
-    const fallbackLimit = filteredType === 'movie' ? sourceLimit : limit;
+    const fallbackLimit = filteredType === 'movie' ? sourceLimit : neededItems;
     const fallbackIncludeItemTypes = filteredType === 'movie' ? 'Movie' : 'Movie,Episode';
     const r = await jellyfinClient.request(`/Users/${jellyfin.userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${fallbackLimit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=${fallbackIncludeItemTypes}`);
-    if (!r.ok) return { items: [], warning: `jellyfin: ${r.error}` };
+    if (!r.ok) return { items: [], start_index: startIndex, limit, warning: `jellyfin: ${r.error}` };
 
     const list = r.json?.Items || [];
     const items = list
@@ -384,8 +388,8 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
 
     const warning = [allUsersResult.error, dbResult.error].filter(Boolean).join(' | ');
     const extraWarning = activityLogResult.error ? `${warning ? `${warning} | ` : ''}${activityLogResult.error}` : warning;
-    const filteredItems = applyTypeFilter(items, filteredType).slice(0, limit);
-    return { items: filteredItems, source: 'jellyfin-user-fallback', warning: extraWarning };
+    const filteredItems = applyTypeFilter(items, filteredType).slice(startIndex, startIndex + limit);
+    return { items: filteredItems, start_index: startIndex, limit, source: 'jellyfin-user-fallback', warning: extraWarning };
   }
 
   return {

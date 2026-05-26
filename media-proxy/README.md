@@ -60,7 +60,7 @@ Current endpoint contract:
 GET /health
 GET /api/media/health
 GET /api/media/img?u=<url>&auth=jellyfin
-GET /api/media/recently-watched?limit=12
+GET /api/media/recently-watched?limit=12&start_index=0
 GET /api/media/recently-added?limit=10
 GET /api/media/library?limit=50&start_index=0&played=all&sort=recently_added
 GET /api/media/search?q=inception&limit=20
@@ -74,10 +74,12 @@ GET /debug-routes
 
 `GET /api/media/library` accepts `limit`, `start_index`, `startIndex`, and `offset` pagination params. `limit` defaults to `50` and is capped at `200` items per page. `start_index` is the canonical zero-based page offset; `startIndex` and `offset` are accepted as aliases.
 
-`GET /api/media/recently-watched` accepts optional `type` filtering.
-- Default behavior (`type` omitted or empty): returns mixed recent items exactly as before (movies and episodes when present).
-- `type=movie`: returns only rows where normalized `media_type` is `movie` (episodes/series are filtered out).
+`GET /api/media/recently-watched` accepts optional `type` filtering and pagination.
+- Default behavior (`type` omitted or empty): returns mixed recent items (movies and episodes when present).
+- `type=movie`: returns only rows where normalized `media_type` is `movie` (episodes/series are filtered out). The type filter applies before the limit cuts in, so a TV-heavy history will not truncate movie results below `limit`.
+- `start_index` (alias: `startIndex`): zero-based page offset, defaults to `0`. Pagination composes with `type` filtering — `?type=movie&limit=20&start_index=20` returns the second page of movie-only results.
 - Any other non-empty `type` value is ignored and uses the default mixed-item behavior.
+- Response includes `start_index` and `limit` fields alongside `items` and `source`.
 
 `GET /api/media/search` requires non-empty `q`. Missing/empty `q` returns `400` with `{ "error": "missing query parameter: q" }`.
 Search returns normalized movie items in the same base shape as `/api/media/library`, with additional `library_state`:
@@ -187,6 +189,7 @@ Those should return normalized data. Fritterflix should not need to understand r
     {
       "id": "jellyfin-item-id",
       "title": "Movie Title",
+      "sort_name": "movie title",
       "year": 2026,
       "media_type": "movie",
       "provider_ids": { "tmdb": "123", "imdb": "tt123" },

@@ -38,6 +38,11 @@ function normalizeFlexibleProviderIds(providerIds = {}) {
   return out;
 }
 
+function sortKeyFromTitle(value) {
+  const s = String(value || '').trim().toLowerCase();
+  return s.replace(/^(the|a|an)\s+/, '');
+}
+
 function normalizeRuntimeTicks(ticks) {
   if (!Number.isFinite(Number(ticks))) return null;
   return Math.round(Number(ticks) / 10_000_000 / 60);
@@ -54,10 +59,13 @@ export function normalizeMovie(item, imageService) {
   const userData = item.UserData || {};
   const addedAt = normalizeDateMs(item.DateCreated);
   const lastPlayedAt = normalizeDateMs(userData.LastPlayedDate);
+  const rawSortName = String(item.SortName || '').trim();
+  const rawName = String(item.Name || '').trim();
 
   return {
     id: item.Id || null,
     title: item.Name || 'Unknown',
+    sort_name: sortKeyFromTitle(rawSortName || rawName) || 'unknown',
     year: item.ProductionYear || null,
     media_type: 'movie',
     provider_ids: normalizeProviderIds(item.ProviderIds),
@@ -112,7 +120,7 @@ function sortLibrary(items, query) {
       return a.user_data.played ? 1 : -1;
     }
 
-    if (sort === 'title') return a.title.localeCompare(b.title);
+    if (sort === 'title') return (a.sort_name || '').localeCompare(b.sort_name || '');
     if (sort === 'year') return (b.year || 0) - (a.year || 0);
 
     return (b.added_at || 0) - (a.added_at || 0);
