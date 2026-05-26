@@ -74,6 +74,11 @@ GET /debug-routes
 
 `GET /api/media/library` accepts `limit`, `start_index`, `startIndex`, and `offset` pagination params. `limit` defaults to `50` and is capped at `200` items per page. `start_index` is the canonical zero-based page offset; `startIndex` and `offset` are accepted as aliases.
 
+`GET /api/media/recently-watched` accepts optional `type` filtering.
+- Default behavior (`type` omitted or empty): returns mixed recent items exactly as before (movies and episodes when present).
+- `type=movie`: returns only rows where normalized `media_type` is `movie` (episodes/series are filtered out).
+- Any other non-empty `type` value is ignored and uses the default mixed-item behavior.
+
 `GET /api/media/search` requires non-empty `q`. Missing/empty `q` returns `400` with `{ "error": "missing query parameter: q" }`.
 Search returns normalized movie items in the same base shape as `/api/media/library`, with additional `library_state`:
 - `in_library`: found in Jellyfin.

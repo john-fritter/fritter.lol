@@ -3,6 +3,17 @@ import { normalizeKey } from '../lib/normalize.mjs';
 
 export function createRecentlyWatchedService({ config, jellyfinClient, imageService, playbackRepository }) {
   const { jellyfin } = config;
+  const RECENTLY_WATCHED_TYPE_FILTERS = {
+    movie: (item) => item?.media_type === 'movie'
+  };
+
+  function applyTypeFilter(items, type) {
+    const normalizedType = String(type || '').trim().toLowerCase();
+    if (!normalizedType) return items;
+    const filter = RECENTLY_WATCHED_TYPE_FILTERS[normalizedType];
+    if (!filter) return items;
+    return items.filter(filter);
+  }
 
   async function getRecentWatchedAllUsers(limit = 12, resultLimit = limit) {
     const usersResp = await jellyfinClient.getUsers();
@@ -293,7 +304,8 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
     }
   }
 
-  async function getRecentlyWatched(limit = 12) {
+  async function getRecentlyWatched(limit = 12, options = {}) {
+    const filteredType = String(options?.type || '').trim().toLowerCase();
     if (!jellyfin.configured) return { items: [], warning: 'jellyfin not configured' };
 
     const sourceLimit = Math.max(limit * 4, 48);
@@ -325,12 +337,13 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
       recentByMediaKey.set(titleKey, ts);
 
       merged.push(item);
-      if (merged.length >= limit) break;
+      if (!filteredType && merged.length >= limit) break;
     }
 
     if (merged.length > 0) {
+      const filteredItems = applyTypeFilter(merged, filteredType).slice(0, limit);
       return {
-        items: merged,
+        items: filteredItems,
         source: [
           allUsersResult.ok ? 'all-users' : null,
           dbResult.ok ? 'playback-reporting' : null,
@@ -339,7 +352,9 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
       };
     }
 
-    const r = await jellyfinClient.request(`/Users/${jellyfin.userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${limit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=Movie,Episode`);
+    const fallbackLimit = filteredType === 'movie' ? sourceLimit : limit;
+    const fallbackIncludeItemTypes = filteredType === 'movie' ? 'Movie' : 'Movie,Episode';
+    const r = await jellyfinClient.request(`/Users/${jellyfin.userId}/Items?SortBy=DatePlayed&SortOrder=Descending&Limit=${fallbackLimit}&Recursive=true&Fields=BasicSyncInfo,CanDelete,PrimaryImageAspectRatio,ProductionYear&ImageTypeLimit=1&EnableImageTypes=Primary,Backdrop,Thumb&IncludeItemTypes=${fallbackIncludeItemTypes}`);
     if (!r.ok) return { items: [], warning: `jellyfin: ${r.error}` };
 
     const list = r.json?.Items || [];
@@ -369,7 +384,8 @@ export function createRecentlyWatchedService({ config, jellyfinClient, imageServ
 
     const warning = [allUsersResult.error, dbResult.error].filter(Boolean).join(' | ');
     const extraWarning = activityLogResult.error ? `${warning ? `${warning} | ` : ''}${activityLogResult.error}` : warning;
-    return { items, source: 'jellyfin-user-fallback', warning: extraWarning };
+    const filteredItems = applyTypeFilter(items, filteredType).slice(0, limit);
+    return { items: filteredItems, source: 'jellyfin-user-fallback', warning: extraWarning };
   }
 
   return {
