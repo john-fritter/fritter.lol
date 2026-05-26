@@ -56,6 +56,55 @@ async function fetchJson(path) {
   return response.json();
 }
 
+// Smoke check: GET /api/media/recently-watched type=movie composes with start_index pagination.
+{
+  const rw1 = await fetchJson('/api/media/recently-watched?type=movie&limit=5&start_index=0');
+  if (!Array.isArray(rw1.items)) throw new Error('recently-watched type+pagination: items not array');
+  if (!('start_index' in rw1)) throw new Error('recently-watched: response missing start_index');
+  if (rw1.items.some((item) => item.media_type !== 'movie')) {
+    throw new Error('recently-watched ?type=movie&start_index=0: non-movie item in results');
+  }
+  console.log('ok /api/media/recently-watched?type=movie&limit=5&start_index=0');
+
+  if (rw1.items.length === 5) {
+    const rw2 = await fetchJson('/api/media/recently-watched?type=movie&limit=5&start_index=5');
+    if (!Array.isArray(rw2.items)) throw new Error('recently-watched page2: items not array');
+    const page1Ids = new Set(rw1.items.map((i) => i.id).filter(Boolean));
+    const overlap = rw2.items.filter((i) => i.id && page1Ids.has(i.id));
+    if (overlap.length > 0) {
+      throw new Error('recently-watched type=movie+pagination: pages 1 and 2 share items');
+    }
+    console.log('ok /api/media/recently-watched type=movie pagination (no page overlap)');
+  } else {
+    console.log(`skip /api/media/recently-watched type=movie page2 overlap check (only ${rw1.items.length} movie items on page 1)`);
+  }
+}
+
+// Smoke check: GET /api/media/library sort=title order (null-SortName regression).
+{
+  const sortedLib = await fetchJson('/api/media/library?sort=title&limit=50&unwatched_first=false');
+  if (!Array.isArray(sortedLib.items)) throw new Error('library sort=title: items not array');
+
+  if (sortedLib.items.length >= 2) {
+    const normKey = (item) => String(item.sort_name || item.title || '').toLowerCase().replace(/^(the|a|an)\s+/, '');
+    let outOfOrder = null;
+    for (let i = 1; i < sortedLib.items.length; i++) {
+      const prev = normKey(sortedLib.items[i - 1]);
+      const curr = normKey(sortedLib.items[i]);
+      if (curr.localeCompare(prev) < 0) {
+        outOfOrder = { prev: sortedLib.items[i - 1].title, curr: sortedLib.items[i].title };
+        break;
+      }
+    }
+    if (outOfOrder) {
+      throw new Error(`library sort=title: out of order — "${outOfOrder.prev}" before "${outOfOrder.curr}"`);
+    }
+    console.log('ok /api/media/library sort=title order (no sort regression)');
+  } else {
+    console.log('skip /api/media/library sort=title order (fewer than 2 items)');
+  }
+}
+
 // Smoke check: GET /api/media/library pagination and startIndex alias.
 {
   const firstPage = await fetchJson('/api/media/library?limit=1');
