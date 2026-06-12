@@ -243,6 +243,24 @@ notes.fritter.lol {
   }
 }
 
+# Open WebUI / Gizmo chat
+chat.fritter.lol {
+  encode zstd gzip
+
+  reverse_proxy open-webui:8080
+
+  header {
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  }
+
+  log {
+    output file /var/log/caddy/access.log
+    format json
+  }
+}
+
 # Gizmo Hermes dashboard
 # Dashboard binds only to the Docker bridge gateway on the host; Caddy provides TLS + auth.
 gizmo.fritter.lol {
