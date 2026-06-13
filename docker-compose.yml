@@ -249,21 +249,6 @@ services:
       jellyfin:
         condition: service_started
 
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    restart: unless-stopped
-    environment:
-      - OPENAI_API_BASE_URL=http://host.docker.internal:8642/v1
-      - OPENAI_API_KEY=${OPEN_WEBUI_HERMES_API_KEY}
-      - ENABLE_OLLAMA_API=false
-    volumes:
-      - ./config/open-webui:/app/backend/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - default
-
 volumes:
   prometheus-data: {}
   grafana-data: {}

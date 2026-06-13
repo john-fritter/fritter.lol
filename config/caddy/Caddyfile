@@ -243,11 +243,31 @@ notes.fritter.lol {
   }
 }
 
-# Open WebUI / Gizmo chat
+# Hermes WebUI / Gizmo chat
 chat.fritter.lol {
   encode zstd gzip
 
-  reverse_proxy open-webui:8080
+  basic_auth * {
+    admin $2a$14$umId4twQ0JvwfmKh3mp/leq7B8kEBwRP8XVRRyJe2BUD0McqxPhzC
+  }
+
+  # Purge page: kills old Open WebUI service worker.
+  # Visit /purge in browser, then it auto-redirects to /.
+  @purge path /purge /purge/
+  handle @purge {
+    root * /config/html
+    rewrite * /purge-sw.html
+    file_server
+    header Cache-Control "no-store, no-cache, must-revalidate"
+    header Clear-Site-Data "\"cache\", \"storage\""
+  }
+
+  reverse_proxy unix//config/hermes-webui.sock {
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-Host {host}
+    header_up X-Forwarded-Proto {scheme}
+  }
 
   header {
     X-Frame-Options "DENY"
